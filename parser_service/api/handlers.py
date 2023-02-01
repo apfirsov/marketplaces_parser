@@ -3,10 +3,9 @@ from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.session import get_db
 from db.dals import CategoryDLA
 from db.models import Category
-
+from db.session import get_db
 
 #########################
 # BLOCK WITH API ROUTES #

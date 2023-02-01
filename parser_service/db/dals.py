@@ -3,7 +3,6 @@ from typing import List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# from db.models import ParserItem
 from db.models import Category
 
 ###########################################################
@@ -12,7 +11,7 @@ from db.models import Category
 
 
 class CategoryDLA:
-    """Data Access Layer for operating user info"""
+    """Data Access Layer for operating parser info"""
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
 

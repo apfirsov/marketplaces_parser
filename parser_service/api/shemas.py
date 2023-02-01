@@ -1,6 +1,5 @@
 from pydantic import BaseModel
 
-
 #########################
 # BLOCK WITH API MODELS #
 #########################
@@ -19,6 +18,6 @@ class ShowCategory(TunedModel):
     parent_id: int
     shard: str
     query: str
-    url: str  # HttpUrl
+    url: str
     children: bool
     goods_displayed: bool
