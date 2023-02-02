@@ -1,7 +1,7 @@
 import re
 from typing import Optional
 
-from pydantic import BaseModel, validator
+from pydantic import BaseModel, validator, root_validator
 
 
 class SourceCategory(BaseModel):
@@ -12,6 +12,11 @@ class SourceCategory(BaseModel):
     shard: Optional[str]
     query: Optional[str]
     childs: Optional[list[dict]]
+
+    @root_validator()
+    def rename_childs(cls, v):
+        v['children'] = bool(v.pop('childs'))
+        return v
 
     @validator('query')
     def validate_query_prefix(cls, v):

@@ -25,7 +25,6 @@ engine = create_engine(
     echo=True,
     execution_options={"isolation_level": "AUTOCOMMIT"},
 )
-s = Session(bind=engine)
 
 
 def _handle_response(response: list[dict]) -> list[dict]:
@@ -33,22 +32,14 @@ def _handle_response(response: list[dict]) -> list[dict]:
     for item in response:
         try:
             childs: Optional[list[dict]] = item.get('childs')
-            section = SourceCategory(
-                id=item.get('id'),
-                name=item.get('name'),
-                parent_id=item.get('parent'),
-                url=item.get('url'),
-                shard=item.get('shard'),
-                query=item.get('query'),
-                childs=childs
-            )
+            section = SourceCategory(**item)
             if childs:
                 result.extend(_handle_response(childs))
-            section.childs = bool(childs)
             result.append(section.dict())
 
         except ValidationError as error:
             logger.error(error, exc_info=True)
+            raise
 
     return result
 
@@ -56,11 +47,17 @@ def _handle_response(response: list[dict]) -> list[dict]:
 def load_all_items() -> None:
     catalogue_url: str = ('https://static-basket-01.wb.ru/vol0/'
                           'data/main-menu-ru-ru-v2.json')
-    response: list[dict] = requests.get(catalogue_url).json()
+    try:
+        response: list[dict] = requests.get(catalogue_url).json()
+    except Exception as error:
+        logger.error(error, exc_info=True)
+        raise error
+
     objects: list[dict] = _handle_response(response)
 
-    s.bulk_insert_mappings(
-        Category,
-        objects
-    )
-    s.commit()
+    with Session(engine) as s:
+        s.bulk_insert_mappings(
+            Category,
+            objects
+        )
+        s.commit()
