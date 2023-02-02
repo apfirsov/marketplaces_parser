@@ -13,6 +13,7 @@ class TunedModel(BaseModel):
 
 
 class ShowCategory(TunedModel):
+    pk: int
     id: int
     name: str
     parent_id: int
