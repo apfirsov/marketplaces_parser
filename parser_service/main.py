@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.routing import APIRouter
 
 from api.handlers import parser_router
-from utilites import add_category
+from loader import categories
 
 #########################
 # BLOCK WITH API ROUTES #
@@ -29,8 +29,8 @@ app.include_router(main_api_router)
 def main():
     func_name = sys.argv[1:]
     if func_name:
-        if func_name[0] == "add_category":
-            add_category.add_all_items()
+        if func_name[0] == "categories":
+            categories.add_all_items()
     else:
         uvicorn.run(app, host="0.0.0.0", port=8000)
 

@@ -20,4 +20,3 @@ class ShowCategory(TunedModel):
     query: str
     url: str
     children: bool
-    goods_displayed: bool

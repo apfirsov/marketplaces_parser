@@ -15,9 +15,8 @@ engine = create_engine(
 s = Session(bind=engine)
 
 
-def add_all_items() -> None:
-
-    with open("utilites/category.json", "r") as file:
+def load_all_items() -> None:
+    with open("loader/category.json", "r") as file:
         objects = json.load(file)
     s.bulk_insert_mappings(
         Category,

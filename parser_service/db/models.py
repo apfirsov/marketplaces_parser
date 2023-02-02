@@ -41,7 +41,3 @@ class Category(Base):
         "children",
         Boolean
     )
-    goods_displayed = Column(
-        "displayed",
-        Boolean
-    )

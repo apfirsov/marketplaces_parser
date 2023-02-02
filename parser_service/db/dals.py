@@ -10,7 +10,7 @@ from db.models import Category
 ###########################################################
 
 
-class CategoryDLA:
+class CategoryDAL:
     """Data Access Layer for operating parser info"""
     def __init__(self, db_session: AsyncSession):
         self.db_session = db_session
