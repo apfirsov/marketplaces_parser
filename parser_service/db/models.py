@@ -12,10 +12,14 @@ Base = declarative_base()
 class Category(Base):
     __tablename__ = "Category"
 
-    id = Column(
+    pk = Column(
         "id",
         Integer,
         primary_key=True
+    )
+    id = Column(
+        "id",
+        Integer
     )
     name = Column(
         "name",
