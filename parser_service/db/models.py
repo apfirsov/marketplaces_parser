@@ -13,7 +13,7 @@ class Category(Base):
     __tablename__ = "Category"
 
     pk = Column(
-        "id",
+        "pk",
         Integer,
         primary_key=True
     )
