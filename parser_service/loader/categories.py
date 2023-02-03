@@ -53,14 +53,18 @@ def _handle_response(response: list[dict]) -> list[dict]:
 
 
 def load_all_items() -> None:
-    s = Session(bind=engine)
-    s.query(Category).delete()
-    catalogue_url: str = ('https://static-basket-01.wb.ru/vol0/'
+    try:
+        logging.info("Запуск записи в БД categories")
+        catalogue_url: str = ('https://static-basket-01.wb.ru/vol0/'
                           'data/main-menu-ru-ru-v2.json')
-    response: list[dict] = requests.get(catalogue_url).json()
-    objects: list[dict] = _handle_response(response)
-    s.bulk_insert_mappings(
-        Category,
-        objects
-    )
-    s.commit()
+        response: list[dict] = requests.get(catalogue_url).json()
+        objects: list[dict] = _handle_response(response)
+        s = Session(bind=engine)
+        s.query(Category).delete()
+        s.bulk_insert_mappings(
+            Category,
+            objects
+        )
+        s.commit()
+    except Exception as e:
+        logging.exception(f"ошибка записи в БД {e}")
