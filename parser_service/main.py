@@ -30,7 +30,7 @@ def main():
     func_name = sys.argv[1:]
     if func_name:
         if func_name[0] == "categories":
-            categories.add_all_items()
+            categories.load_all_items()
     else:
         uvicorn.run(app, host="0.0.0.0", port=8000)
 
