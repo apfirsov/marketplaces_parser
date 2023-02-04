@@ -3,6 +3,7 @@ import sys
 from typing import Optional
 
 import requests
+from constants import MAIN_MENU
 from db.models import Category
 from pydantic import ValidationError
 from schemas import SourceCategory
@@ -39,8 +40,7 @@ def load_all_items() -> None:
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
 
-    catalogue_url: str = ('https://static-basket-01.wb.ru/vol0/'
-                          'data/main-menu-ru-ru-v2.json')
+    catalogue_url: str = MAIN_MENU
     try:
         try:
             response: list[dict] = requests.get(catalogue_url).json()
