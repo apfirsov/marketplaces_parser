@@ -1,11 +1,10 @@
-import sys
+import logging
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 
 from api.handlers import parser_router
-from loader import categories
 
 #########################
 # BLOCK WITH API ROUTES #
@@ -27,12 +26,10 @@ app.include_router(main_api_router)
 
 
 def main():
-    func_name = sys.argv[1:]
-    if func_name:
-        if func_name[0] == "categories":
-            categories.load_all_items()
-    else:
+    try:
         uvicorn.run(app, host="0.0.0.0", port=8000)
+    except Exception as e:
+        logging.exception(f"uvicorn faild {e}")
 
 
 if __name__ == "__main__":

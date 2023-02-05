@@ -1,15 +1,17 @@
-import logging
 import sys
 from typing import Optional
 
 import requests
-from constants import MAIN_MENU
-from db.models import Category
 from pydantic import ValidationError
-from schemas import SourceCategory
-from settings import POSTGRES_URL
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+
+from db.models import Category
+from settings import POSTGRES_URL
+
+from .constants import MAIN_MENU
+from .logger_file_conf import parser_logger as logger
+from .schemas import SourceCategory
 
 engine = create_engine(
     POSTGRES_URL,
@@ -31,15 +33,6 @@ def _handle_response(response: list[dict]) -> list[dict]:
 
 
 def load_all_items() -> None:
-
-    handler = logging.StreamHandler()
-    handler.formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
-    logger.addHandler(handler)
-
     catalogue_url: str = MAIN_MENU
     try:
         try:
