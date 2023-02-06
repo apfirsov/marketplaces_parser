@@ -41,10 +41,11 @@ def load_all_items() -> None:
         except ValidationError as error:
             raise error
     except Exception as error:
-        logger.error(error, exc_info=True)
+        logger.exception(error)
         sys.exit()
 
     with Session(engine) as s:
+        s.query(Category).delete()
         s.bulk_insert_mappings(
             Category,
             objects

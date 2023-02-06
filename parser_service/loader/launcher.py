@@ -21,8 +21,8 @@ def main(argv=None):
             f"start launcher with param: {func_name[0]} {func_name[1]}"
         )
         LAUNCH_OPTIONS[func_name[0]][func_name[1]]()
-    except Exception as e:
-        logger.exception(f"launcher faild: {e}")
+    except Exception as error:
+        logger.exception(f"launcher faild: {error}")
 
 
 if __name__ == '__main__':
