@@ -10,7 +10,7 @@ from db.models import Category
 from settings import POSTGRES_URL
 
 from .constants import MAIN_MENU
-from .logger_file_conf import parser_logger as logger
+from logger_config import parser_logger as logger
 from .schemas import SourceCategory
 
 engine = create_engine(

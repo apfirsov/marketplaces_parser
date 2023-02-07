@@ -7,7 +7,7 @@ logging_schema = {
     "formatters": {
         "standard": {
             "class": "logging.Formatter",
-            "format": "%(asctime)s\t%(levelname)s\t%(filename)s\t%(message)s",
+            "format": '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
             "datefmt": "%d %b %y %H:%M:%S"
         }
     },
@@ -30,7 +30,7 @@ logging_schema = {
         }
     },
     "loggers": {
-        "__main__": {  # if __name__ == "__main__"
+        "__main__": {
             "handlers": ["console", "file"],
             "level": "INFO",
             "propagate": False
