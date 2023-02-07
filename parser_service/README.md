@@ -39,10 +39,10 @@ from myapp import mymodel
 
 ## Для запуска дополнительных функций (процессы связанные с сбором информации )
 
- ```python -m [действие] [категория]```
+ ```python -m loader [действие] [категория]```
 
  Пример:
 
- ```python -m start --categories```
+ ```python -m loader start --categories```
 
 
