@@ -1,15 +1,16 @@
-"""create_category_table
+"""delete_pk
 
-Revision ID: 35f178b4cb4a
+Revision ID: cfe31be0e4d2
 Revises: 
-Create Date: 2023-02-01 22:08:40.105135
+Create Date: 2023-02-09 21:29:49.175472
 
 """
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
+
 
 # revision identifiers, used by Alembic.
-revision = '35f178b4cb4a'
+revision = 'cfe31be0e4d2'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -25,7 +26,6 @@ def upgrade() -> None:
     sa.Column('query', sa.String(), nullable=True),
     sa.Column('url', sa.String(), nullable=True),
     sa.Column('children', sa.Boolean(), nullable=True),
-    sa.Column('displayed', sa.Boolean(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     # ### end Alembic commands ###
