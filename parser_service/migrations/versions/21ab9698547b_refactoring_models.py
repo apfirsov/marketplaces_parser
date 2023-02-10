@@ -1,8 +1,8 @@
-"""comment
+"""refactoring_models
 
-Revision ID: 41507eb01b6f
+Revision ID: 21ab9698547b
 Revises: 
-Create Date: 2023-02-10 16:11:29.710721
+Create Date: 2023-02-10 22:59:08.878132
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '41507eb01b6f'
+revision = '21ab9698547b'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -23,14 +23,14 @@ def upgrade() -> None:
     sa.Column('name', sa.String(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('category',
+    op.create_table('categories',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('name', sa.String(), nullable=True),
     sa.Column('parent_id', sa.Integer(), nullable=True),
     sa.Column('url', sa.String(), nullable=True),
-    sa.Column('category_shard', sa.String(), nullable=True),
+    sa.Column('shard', sa.String(), nullable=True),
     sa.Column('query', sa.String(), nullable=True),
-    sa.Column('children', sa.Boolean(), nullable=True),
+    sa.Column('childs', sa.Boolean(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('colors',
@@ -50,7 +50,7 @@ def upgrade() -> None:
     sa.Column('brand_id', sa.Integer(), nullable=True),
     sa.Column('color_id', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['brand_id'], ['brands.id'], ),
-    sa.ForeignKeyConstraint(['catalogue_id'], ['category.id'], ),
+    sa.ForeignKeyConstraint(['catalogue_id'], ['categories.id'], ),
     sa.ForeignKeyConstraint(['color_id'], ['colors.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -62,7 +62,7 @@ def upgrade() -> None:
     sa.Column('price_full', sa.Integer(), nullable=True),
     sa.Column('price_with_discount', sa.Integer(), nullable=True),
     sa.Column('rating', sa.Float(), nullable=True),
-    sa.Column('feedback', sa.Integer(), nullable=True),
+    sa.Column('feedbacks_count', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['good_id'], ['goods.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -85,6 +85,6 @@ def downgrade() -> None:
     op.drop_table('goods')
     op.drop_table('sizes')
     op.drop_table('colors')
-    op.drop_table('category')
+    op.drop_table('categories')
     op.drop_table('brands')
     # ### end Alembic commands ###
