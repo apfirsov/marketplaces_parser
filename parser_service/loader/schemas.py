@@ -7,7 +7,7 @@ from pydantic import BaseModel, root_validator, validator
 class SourceCategory(BaseModel):
     id: int
     name: str
-    parent_id: Optional[int]
+    parent: Optional[int]
     url: str
     shard: Optional[str]
     query: Optional[str]

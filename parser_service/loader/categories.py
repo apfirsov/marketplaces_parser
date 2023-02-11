@@ -2,6 +2,7 @@ import sys
 from typing import Optional
 
 import requests
+from http import HTTPStatus
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -10,6 +11,7 @@ from db.models import Category
 from settings import POSTGRES_URL
 
 from .constants import MAIN_MENU
+from .exceptions import EmptyResponseError, ResponseStatusCodeError
 from logger_config import parser_logger as logger
 from .schemas import SourceCategory
 
@@ -25,10 +27,13 @@ def _handle_response(response: list[dict]) -> list[dict]:
     result: list[dict] = []
     for item in response:
         childs: Optional[list[dict]] = item.get('childs')
-        section = SourceCategory(**item)
+        landing: Optional[list[dict]] = item.get('landing')
+        parent: Optional[list[dict]] = item.get('parent')
+        if landing or parent:
+            section = SourceCategory(**item)
+            result.append(section.dict())
         if childs:
             result.extend(_handle_response(childs))
-        result.append(section.dict())
     return result
 
 
@@ -37,9 +42,19 @@ def load_all_items() -> None:
     try:
         try:
             response: list[dict] = requests.get(catalogue_url).json()
+            if response.status_code != HTTPStatus.OK:
+                raise ResponseStatusCodeError()
+            if not len(response):
+                raise EmptyResponseError()
+
+        except requests.exceptions.JSONDecodeError as error:
+            raise error
+
+        try:
             objects: list[dict] = _handle_response(response)
         except ValidationError as error:
             raise error
+
     except Exception as error:
         logger.exception(error)
         sys.exit()
