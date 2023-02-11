@@ -14,8 +14,9 @@ class SourceCategory(BaseModel):
     childs: Optional[list[dict]]
 
     @root_validator()
-    def rename_childs(cls, v):
+    def rename_fields(cls, v):
         v['children'] = bool(v.pop('childs'))
+        v['parent_id'] = v.pop('parent')
         return v
 
     @validator('query')

@@ -41,17 +41,21 @@ def load_all_items() -> None:
     catalogue_url: str = MAIN_MENU
     try:
         try:
-            response: list[dict] = requests.get(catalogue_url).json()
+            response = requests.get(catalogue_url)
+
             if response.status_code != HTTPStatus.OK:
                 raise ResponseStatusCodeError()
-            if not len(response):
+
+            response_json: list[dict] = response.json()
+
+            if not len(response_json):
                 raise EmptyResponseError()
 
         except requests.exceptions.JSONDecodeError as error:
             raise error
 
         try:
-            objects: list[dict] = _handle_response(response)
+            objects: list[dict] = _handle_response(response_json)
         except ValidationError as error:
             raise error
 
