@@ -32,8 +32,8 @@ def _handle_response(response: list[dict]) -> list[dict]:
         if landing or parent:
             section = SourceCategory(**item)
             result.append(section.dict())
-        if childs:
-            result.extend(_handle_response(childs))
+            if childs:
+                result.extend(_handle_response(childs))
     return result
 
 
