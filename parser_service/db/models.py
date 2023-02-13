@@ -17,11 +17,11 @@ class Category(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String,)
-    parent_id = Column(Integer)
+    parent = Column(Integer)
     url = Column(String)
     shard = Column(String)
     query = Column(String)
-    childs = Column(Boolean)
+    сhildren = Column(Boolean)
 
 
 class Brand(Base):
@@ -38,14 +38,14 @@ class Color(Base):
     name = Column(String)
 
 
-class Good(Base):
-    __tablename__ = "goods"
+class Item(Base):
+    __tablename__ = "items"
 
     id = Column(Integer, primary_key=True)
-    catalogue_id = Column(Integer, ForeignKey("categories.id"))
+    category = Column(Integer, ForeignKey("categories.id"))
     name = Column(String)
-    brand_id = Column(Integer, ForeignKey("brands.id"))
-    color_id = Column(Integer, ForeignKey("colors.id"))
+    brand = Column(Integer, ForeignKey("brands.id"))
+    color = Column(Integer, ForeignKey("colors.id"))
 
 
 class Size(Base):
@@ -55,24 +55,25 @@ class Size(Base):
     name = Column(String)
 
 
-class GoodsHistorySize(Base):
-    __tablename__ = "goods_history_size"
+class HistorySizeRelation(Base):
+    __tablename__ = "history_size_relations"
 
     id = Column(Integer, primary_key=True)
-    history_id = Column(ForeignKey("goods_history.id"), primary_key=True)
-    size_id = Column(ForeignKey("sizes.id"), primary_key=True)
-    amount = Column(Integer)
+    history = Column(ForeignKey("items_history.id"), primary_key=True)
+    size = Column(ForeignKey("sizes.id"), primary_key=True)
+    count = Column(Integer)
 
 
-class GoodsHistory(Base):
-    __tablename__ = "goods_history"
+class ItemsHistory(Base):
+    __tablename__ = "items_history"
 
     id = Column(Integer, primary_key=True)
-    good_id = Column(Integer, ForeignKey("goods.id"))
+    item = Column(Integer, ForeignKey("items.id"))
     timestamp = Column(DateTime)
     sale = Column(Float)
     price_full = Column(Integer)
     price_with_discount = Column(Integer)
     rating = Column(Float)
-    feedbacks_count = Column(Integer)
+    feedbacks = Column(Integer)
     sizes = relationship("GoodsHistorySize")
+    sum_count = Column(Integer)
