@@ -1,13 +1,8 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from db.dals import CategoryDAL, GoodsHystoryDAL
 from db.models import Category, GoodsHistory
 from db.session import get_db
-
-#########################
-# BLOCK WITH API ROUTES #
-#########################
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 parser_router = APIRouter()
 

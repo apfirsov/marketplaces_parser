@@ -1,9 +1,4 @@
-from datetime import datetime
 from pydantic import BaseModel
-
-#########################
-# BLOCK WITH API MODELS #
-#########################
 
 
 class TunedModel(BaseModel):
@@ -21,15 +16,3 @@ class ShowCategory(TunedModel):
     query: str
     url: str
     children: bool
-
-
-# class SwowGoodsHistory(TunedModel):
-#     id: int
-#     good_id: int = None
-#     timestamp: datetime = None
-#     sale: float = None
-#     price_full: int = None
-#     price_with_discount: int = None
-#     rating: float = None
-#     feedbacks_count: int = None
-#     sizes: list = None

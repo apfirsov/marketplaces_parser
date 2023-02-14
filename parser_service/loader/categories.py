@@ -2,15 +2,14 @@ import sys
 from typing import Optional
 
 import requests
+from db.models import Category
+from logger_config import parser_logger as logger
 from pydantic import ValidationError
+from settings import POSTGRES_URL
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from db.models import Category
-from settings import POSTGRES_URL
-
 from .constants import MAIN_MENU
-from logger_config import parser_logger as logger
 from .schemas import SourceCategory
 
 engine = create_engine(

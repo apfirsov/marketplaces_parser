@@ -1,13 +1,6 @@
-from sqlalchemy import (
-    Boolean, Column, Integer,
-    String, ForeignKey, DateTime, Float
-)
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
+                        String)
 from sqlalchemy.orm import declarative_base, relationship
-
-##############################
-# BLOCK WITH DATABASE MODELS #
-##############################
-
 
 Base = declarative_base()
 

@@ -1,16 +1,10 @@
 import uvicorn
+from api.handlers import parser_router
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 from logger_config import parser_logger as logger
 
-from api.handlers import parser_router
 
-#########################
-# BLOCK WITH API ROUTES #
-#########################
-
-
-# create instance of the app
 def create_app() -> FastAPI:
     app = FastAPI(title='Parser_marketplace', debug=False)
     app.logger = logger
@@ -19,10 +13,8 @@ def create_app() -> FastAPI:
 
 app = create_app()
 
-# create the instance for the routes
 main_api_router = APIRouter()
 
-# set routes to the app instance
 main_api_router.include_router(
     parser_router,
     prefix="/api",

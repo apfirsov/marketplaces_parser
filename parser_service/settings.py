@@ -1,4 +1,3 @@
-"""File with settings and configs for the project"""
 import os
 
 from dotenv import load_dotenv

@@ -1,7 +1,6 @@
 import logging
 from logging.config import dictConfig
 
-
 logging_schema = {
     "version": 1,
     "formatters": {

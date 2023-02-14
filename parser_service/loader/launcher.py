@@ -1,5 +1,6 @@
-from .categories import load_all_items
 from logger_config import parser_logger as logger
+
+from .categories import load_all_items
 
 LAUNCH_OPTIONS = {
     "start": {
