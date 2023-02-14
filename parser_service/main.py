@@ -3,10 +3,11 @@ from api.handlers import parser_router
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
 from logger_config import parser_logger as logger
+from settings import HOST, PORT, API_TITLE, ROUTER_TAGS, API_PREFIX
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title='Parser_marketplace', debug=False)
+    app = FastAPI(title=API_TITLE, debug=False)
     app.logger = logger
     return app
 
@@ -17,15 +18,15 @@ main_api_router = APIRouter()
 
 main_api_router.include_router(
     parser_router,
-    prefix="/api",
-    tags=["parserAPI"]
+    prefix=API_PREFIX,
+    tags=ROUTER_TAGS
 )
 app.include_router(main_api_router)
 
 
 def main():
     try:
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+        uvicorn.run(app, host=HOST, port=PORT)
     except Exception as e:
         logger.exception(f"uvicorn failed {e}")
 
