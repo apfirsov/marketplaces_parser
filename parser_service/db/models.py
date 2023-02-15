@@ -67,5 +67,5 @@ class ItemsHistory(Base):
     price_with_discount = Column(Integer)
     rating = Column(Float)
     feedbacks = Column(Integer)
-    sizes = relationship("GoodsHistorySize")
+    sizes = relationship("HistorySizeRelation")
     sum_count = Column(Integer)
