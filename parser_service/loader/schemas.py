@@ -7,14 +7,14 @@ from pydantic import BaseModel, root_validator, validator
 class SourceCategory(BaseModel):
     id: int
     name: str
-    parent_id: Optional[int]
+    parent: Optional[int]
     url: str
     shard: Optional[str]
     query: Optional[str]
     childs: Optional[list[dict]]
 
     @root_validator()
-    def rename_childs(cls, v):
+    def modify_childs(cls, v):
         v['children'] = bool(v.pop('childs'))
         return v
 
