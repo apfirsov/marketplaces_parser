@@ -51,7 +51,6 @@ class Size(Base):
 class HistorySizeRelation(Base):
     __tablename__ = "history_size_relations"
 
-    id = Column(Integer, primary_key=True)
     history = Column(ForeignKey("items_history.id"), primary_key=True)
     size = Column(ForeignKey("sizes.id"), primary_key=True)
     count = Column(Integer)

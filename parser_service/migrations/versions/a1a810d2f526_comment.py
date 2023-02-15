@@ -1,15 +1,16 @@
 """comment
 
-Revision ID: cef2a053144b
+Revision ID: a1a810d2f526
 Revises: 
-Create Date: 2023-02-13 16:28:48.859788
+Create Date: 2023-02-15 21:21:55.978209
 
 """
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
+
 
 # revision identifiers, used by Alembic.
-revision = 'cef2a053144b'
+revision = 'a1a810d2f526'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -67,13 +68,12 @@ def upgrade() -> None:
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('history_size_relations',
-    sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('history', sa.Integer(), nullable=False),
     sa.Column('size', sa.Integer(), nullable=False),
     sa.Column('count', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['history'], ['items_history.id'], ),
     sa.ForeignKeyConstraint(['size'], ['sizes.id'], ),
-    sa.PrimaryKeyConstraint('id', 'history', 'size')
+    sa.PrimaryKeyConstraint('history', 'size')
     )
     # ### end Alembic commands ###
 
