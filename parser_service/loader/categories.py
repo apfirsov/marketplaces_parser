@@ -3,7 +3,6 @@ from typing import Optional
 
 import requests
 from http import HTTPStatus
-from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -19,7 +18,7 @@ engine = create_engine(
     POSTGRES_URL,
     future=True,
     echo=True,
-    execution_options={"isolation_level": "AUTOCOMMIT"},
+    execution_options={'isolation_level': 'AUTOCOMMIT'},
 )
 
 
@@ -40,24 +39,17 @@ def _handle_response(response: list[dict]) -> list[dict]:
 def load_all_items() -> None:
     catalogue_url: str = MAIN_MENU
     try:
-        try:
-            response = requests.get(catalogue_url)
+        response = requests.get(catalogue_url)
 
-            if response.status_code != HTTPStatus.OK:
-                raise ResponseStatusCodeError()
+        if response.status_code != HTTPStatus.OK:
+            raise ResponseStatusCodeError()
 
-            response_json: list[dict] = response.json()
+        response_json: list[dict] = response.json()
 
-            if not len(response_json):
-                raise EmptyResponseError()
+        if not len(response_json):
+            raise EmptyResponseError()
 
-        except requests.exceptions.JSONDecodeError as error:
-            raise error
-
-        try:
-            objects: list[dict] = _handle_response(response_json)
-        except ValidationError as error:
-            raise error
+        objects: list[dict] = _handle_response(response_json)
 
     except Exception as error:
         logger.exception(error)
