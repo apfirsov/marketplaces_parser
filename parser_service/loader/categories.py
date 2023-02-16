@@ -12,7 +12,7 @@ from settings import POSTGRES_URL
 from .constants import MAIN_MENU
 from .exceptions import EmptyResponseError, ResponseStatusCodeError
 from logger_config import parser_logger as logger
-from .schemas import SourceCategory
+from .schemas import CategorySchema
 
 engine = create_engine(
     POSTGRES_URL,
@@ -29,14 +29,14 @@ def _handle_response(response: list[dict]) -> list[dict]:
         landing: Optional[list[dict]] = item.get('landing')
         parent: Optional[list[dict]] = item.get('parent')
         if landing or parent:
-            section = SourceCategory(**item)
+            section = CategorySchema(**item)
             result.append(section.dict())
             if childs:
                 result.extend(_handle_response(childs))
     return result
 
 
-def load_all_items() -> None:
+def load_all_categories() -> None:
     catalogue_url: str = MAIN_MENU
     try:
         response = requests.get(catalogue_url)
