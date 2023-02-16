@@ -5,7 +5,12 @@ from asyncio import Queue, Task, create_task
 from typing import Optional
 
 import requests
+from db.models import Category
 from logger_config import parser_logger as logger
+from settings import POSTGRES_URL
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session
+from sqlalchemy.sql.selectable import Select
 
 from .constants import (BASE_URL, LAST_PAGE_TRESHOLD, MAX_BRANDS_IN_REQUEST,
                         MAX_GOODS_IN_BRANDS_FILTER, MAX_GOODS_IN_REQUEST,
@@ -286,22 +291,14 @@ async def collect_data(queue: Queue) -> None:
         pprint(color_objects[1])
 
 
-async def parsing_manager() -> None:
-
-    flat_catalog: str = 'catalogue_sh.json'
-
-    try:
-        with open(flat_catalog, 'r') as file:
-            catalogue = json.load(file)
-    except FileNotFoundError as error:
-        logger.error(error, exc_info=True)
+async def parsing_manager(categories: list[dict]) -> None:
 
     queue1: Queue = Queue()
     queue2: Queue = Queue()
     queue3: Queue = Queue()
 
     get_items_ids_tasks: list[Task] = [create_task(
-        get_items_ids(item, queue1)) for item in catalogue]
+        get_items_ids(item, queue1)) for item in categories]
 
     infinite_tasks: list[Task] = []
     infinite_tasks.append(create_task(concatenate_ids(queue1, queue2)))
@@ -319,4 +316,13 @@ async def parsing_manager() -> None:
 
 
 def load_all_items() -> None:
-    asyncio.run(parsing_manager())
+    engine = create_engine(POSTGRES_URL)
+
+    with Session(engine) as session:
+        selectable: Select = select(Category).where(Category.id == 128456)
+        # selectable: Select = select(Category)
+        categories: list[dict] = [
+            _.__dict__ for _ in session.scalars(selectable)
+        ]
+
+    asyncio.run(parsing_manager(categories))
