@@ -1,23 +1,27 @@
 import sys
 from typing import Optional
-
+import asyncio
 import requests
 from db.models import Category
 from logger_config import parser_logger as logger
 from pydantic import ValidationError
-from settings import POSTGRES_URL
+from settings import POSTGRES_URL, REAL_DATABASE_URL
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
+from db.session import engine
+from db.session import get_db
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from .constants import MAIN_MENU
 from .schemas import SourceCategory
 
-engine = create_engine(
-    POSTGRES_URL,
-    future=True,
-    echo=True,
-    execution_options={"isolation_level": "AUTOCOMMIT"},
-)
+# engine = create_engine(
+#     POSTGRES_URL,
+#     future=True,
+#     echo=True,
+#     execution_options={"isolation_level": "AUTOCOMMIT"},
+# )
 
 
 def _handle_response(response: list[dict]) -> list[dict]:
@@ -31,7 +35,9 @@ def _handle_response(response: list[dict]) -> list[dict]:
     return result
 
 
-def load_all_items() -> None:
+async def load_all_items() -> None:
+    db: AsyncSession = Depends(get_db)
+    
     catalogue_url: str = MAIN_MENU
     try:
         try:
@@ -43,10 +49,17 @@ def load_all_items() -> None:
         logger.exception(error)
         sys.exit()
 
-    with Session(engine) as s:
-        s.query(Category).delete()
-        s.bulk_insert_mappings(
-            Category,
-            objects
-        )
-        s.commit()
+    async with db as session:
+        async with session.begin():
+            await session.query(Category).delete()
+            await session.bulk_insert_mappings(
+                Category,
+                objects
+            )
+            await session.commit()
+
+
+# async def test() -> None:
+#     print("test")
+#     await asyncio.sleep(1)
+#     print("test")
