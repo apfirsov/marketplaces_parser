@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.selectable import Select
 
 from .constants import (BASE_URL, LAST_PAGE_TRESHOLD, MAX_BRANDS_IN_REQUEST,
-                        MAX_GOODS_IN_BRANDS_FILTER, MAX_GOODS_IN_REQUEST,
+                        MAX_ITEMS_IN_BRANDS_FILTER, MAX_ITEMS_IN_REQUEST,
                         MAX_PAGE, MIN_PRICE_RANGE, QUERY_PARAMS)
 from .schemas import (BrandSchema, ColorSchema, HistorySizeRelationSchema,
                       ItemSchema, ItemsHistorySchema, SizeSchema)
@@ -34,7 +34,7 @@ async def get_items_ids(item: dict, queue: Queue) -> None:
             ctg_filters: list[dict] = response.get('data').get('filters')
             for ctg_filter in ctg_filters:
                 if ctg_filter.get('key') == 'priceU':
-                    ctg_max_price: int = ctg_filter.get('maxPriceU') // 100
+                    ctg_max_price: int = ctg_filter.get('maxPriceU')
                     break
 
             ids_list: list[int] = basic_parsing(
@@ -60,7 +60,7 @@ def basic_parsing(item_id: int,
 
     result: list[int] = []
 
-    price_lmt: str = f'&priceU={min_pr * 100};{max_pr * 100}'
+    price_lmt: str = f'&priceU={min_pr};{max_pr}'
 
     base_url: str = (f'{BASE_URL}{shard}/catalog?'
                      f'{QUERY_PARAMS}&{query}{price_lmt}')
@@ -78,7 +78,7 @@ def basic_parsing(item_id: int,
             check_last_page_is_full()
 
     if check_last_page_is_full():
-        rnd_avg: int = round((max_pr + min_pr) // 2 + 1, -2)
+        rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
         if rnd_avg - min_pr >= MIN_PRICE_RANGE:
             result.extend(
                 basic_parsing(item_id, shard, query, min_pr, rnd_avg)
@@ -121,7 +121,7 @@ def parse_by_brand(item_id: int,
     for brand in brand_filters:
         brand_id: int = brand.get('id')
         brand_count: int = brand.get('count')
-        if brand_count > MAX_GOODS_IN_BRANDS_FILTER:
+        if brand_count > MAX_ITEMS_IN_BRANDS_FILTER:
             concatenated_ids_list.append(str(brand_id))
         elif cnt < MAX_BRANDS_IN_REQUEST:
             concatenated_ids = ';'.join([concatenated_ids, str(brand_id)])
@@ -190,7 +190,7 @@ async def concatenate_ids(queue1: Queue, queue2: Queue) -> None:
         cnt: int = 0
 
         for item_id in goods[1]:
-            if cnt < MAX_GOODS_IN_REQUEST:
+            if cnt < MAX_ITEMS_IN_REQUEST:
                 concatenated_ids = ';'.join([concatenated_ids, str(item_id)])
                 cnt += 1
             else:
@@ -319,7 +319,7 @@ def load_all_items() -> None:
     engine = create_engine(POSTGRES_URL)
 
     with Session(engine) as session:
-        selectable: Select = select(Category).where(Category.id == 128456)
+        selectable: Select = select(Category).where(Category.id.in_([128456]))
         # selectable: Select = select(Category)
         categories: list[dict] = [
             _.__dict__ for _ in session.scalars(selectable)
