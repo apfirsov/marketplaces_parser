@@ -1,17 +1,18 @@
 import sys
 from typing import Optional
-import asyncio
+# import asyncio
 import requests
 from db.models import Category
 from logger_config import parser_logger as logger
 from pydantic import ValidationError
-from settings import POSTGRES_URL, REAL_DATABASE_URL
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-from db.session import engine
+# from settings import POSTGRES_URL, REAL_DATABASE_URL
+# from sqlalchemy import create_engine
+# from sqlalchemy.orm import Session
+# from db.session import engine
 from db.session import get_db
-from fastapi import APIRouter, Depends
+# from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import delete
 
 from .constants import MAIN_MENU
 from .schemas import SourceCategory
@@ -36,8 +37,9 @@ def _handle_response(response: list[dict]) -> list[dict]:
 
 
 async def load_all_items() -> None:
-    db: AsyncSession = Depends(get_db)
-    
+    db = get_db()
+    session: AsyncSession = await anext(db)
+
     catalogue_url: str = MAIN_MENU
     try:
         try:
@@ -49,17 +51,9 @@ async def load_all_items() -> None:
         logger.exception(error)
         sys.exit()
 
-    async with db as session:
-        async with session.begin():
-            await session.query(Category).delete()
-            await session.bulk_insert_mappings(
-                Category,
-                objects
-            )
-            await session.commit()
+    inst_lst = [Category(**dct) for dct in objects]
 
-
-# async def test() -> None:
-#     print("test")
-#     await asyncio.sleep(1)
-#     print("test")
+    async with session.begin():
+        await session.execute(delete(Category))
+        await session.add_all(inst_lst)
+        await session.commit()
