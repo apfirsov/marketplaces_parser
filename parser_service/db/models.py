@@ -14,7 +14,7 @@ class Category(Base):
     url = Column(String)
     shard = Column(String)
     query = Column(String)
-    сhildren = Column(Boolean)
+    children = Column(Boolean)
 
 
 class Brand(Base):
