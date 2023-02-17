@@ -2,13 +2,10 @@ import sys
 from typing import Optional
 # import asyncio
 import requests
-<<<<<<< HEAD
-=======
 from http import HTTPStatus
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+# from sqlalchemy import create_engine
+# from sqlalchemy.orm import Session
 
->>>>>>> dev
 from db.models import Category
 from logger_config import parser_logger as logger
 from pydantic import ValidationError
@@ -22,27 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete
 
 from .constants import MAIN_MENU
-<<<<<<< HEAD
 from .schemas import SourceCategory
 
-# engine = create_engine(
-#     POSTGRES_URL,
-#     future=True,
-#     echo=True,
-#     execution_options={"isolation_level": "AUTOCOMMIT"},
-# )
-=======
 from .exceptions import EmptyResponseError, ResponseStatusCodeError
 from logger_config import parser_logger as logger
 from .schemas import SourceCategory
-
-engine = create_engine(
-    POSTGRES_URL,
-    future=True,
-    echo=True,
-    execution_options={'isolation_level': 'AUTOCOMMIT'},
-)
->>>>>>> dev
 
 
 def _handle_response(response: list[dict]) -> list[dict]:
