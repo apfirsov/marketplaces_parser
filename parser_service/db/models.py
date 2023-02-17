@@ -10,7 +10,7 @@ class Category(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String,)
-    parent = Column(Integer)
+    parent = Column(Integer, ForeignKey("categories.id"))
     url = Column(String)
     shard = Column(String)
     query = Column(String)

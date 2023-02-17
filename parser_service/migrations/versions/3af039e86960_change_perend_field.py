@@ -1,15 +1,16 @@
-"""ch field
+"""change perend field
 
-Revision ID: f00f66e3b002
+Revision ID: 3af039e86960
 Revises: 
-Create Date: 2023-02-17 16:11:59.638727
+Create Date: 2023-02-17 18:07:09.291340
 
 """
-import sqlalchemy as sa
 from alembic import op
+import sqlalchemy as sa
+
 
 # revision identifiers, used by Alembic.
-revision = 'f00f66e3b002'
+revision = '3af039e86960'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -30,6 +31,7 @@ def upgrade() -> None:
     sa.Column('shard', sa.String(), nullable=True),
     sa.Column('query', sa.String(), nullable=True),
     sa.Column('children', sa.Boolean(), nullable=True),
+    sa.ForeignKeyConstraint(['parent'], ['categories.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('colors',
@@ -57,10 +59,10 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('item', sa.Integer(), nullable=True),
     sa.Column('timestamp', sa.DateTime(), nullable=True),
-    sa.Column('sale', sa.Float(), nullable=True),
+    sa.Column('sale', sa.Integer(), nullable=True),
     sa.Column('price_full', sa.Integer(), nullable=True),
     sa.Column('price_with_discount', sa.Integer(), nullable=True),
-    sa.Column('rating', sa.Float(), nullable=True),
+    sa.Column('rating', sa.Integer(), nullable=True),
     sa.Column('feedbacks', sa.Integer(), nullable=True),
     sa.Column('sum_count', sa.Integer(), nullable=True),
     sa.ForeignKeyConstraint(['item'], ['items.id'], ),
