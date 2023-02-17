@@ -1,8 +1,9 @@
 from typing import List
 
-from db.models import Category
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.models import Category
 
 
 class CategoryDAL:

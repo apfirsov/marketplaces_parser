@@ -1,9 +1,10 @@
 import uvicorn
-from api.handlers import parser_router
 from fastapi import FastAPI
 from fastapi.routing import APIRouter
+
+from api.handlers import parser_router
 from logger_config import parser_logger as logger
-from settings import HOST, PORT, API_TITLE, ROUTER_TAGS, API_PREFIX
+from settings import API_PREFIX, API_TITLE, HOST, PORT, ROUTER_TAGS
 
 
 def create_app() -> FastAPI:

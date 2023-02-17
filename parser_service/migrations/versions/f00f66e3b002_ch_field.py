@@ -1,16 +1,15 @@
-"""comment
+"""ch field
 
-Revision ID: a1a810d2f526
+Revision ID: f00f66e3b002
 Revises: 
-Create Date: 2023-02-15 21:21:55.978209
+Create Date: 2023-02-17 16:11:59.638727
 
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = 'a1a810d2f526'
+revision = 'f00f66e3b002'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -30,7 +29,7 @@ def upgrade() -> None:
     sa.Column('url', sa.String(), nullable=True),
     sa.Column('shard', sa.String(), nullable=True),
     sa.Column('query', sa.String(), nullable=True),
-    sa.Column('сhildren', sa.Boolean(), nullable=True),
+    sa.Column('children', sa.Boolean(), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('colors',
