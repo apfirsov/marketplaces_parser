@@ -20,7 +20,6 @@ from .schemas import (BrandSchema, ColorSchema, HistorySizeRelationSchema,
                       ItemSchema, ItemsHistorySchema, SizeSchema)
 
 # все запросы асинхронные!!
-# класс, у которого очереди станут атрибутами и обращаться к ним через селф
 
 
 class CategoriesStack:
@@ -213,9 +212,10 @@ class ItemsParser:
 
         return ids_list
 
-    # надо ли юзать примитив? Можно добавить второй строчкой что если прилетел None, то break
-        # await event.wait()
-        # break
+    # вар 1: если прилетел None, то break
+    # вар 2: примитив ???
+    # await event.wait()
+    # break
     async def concatenate_ids(self) -> None:
         while True:  # объединить с get_cards чтобы айди объединялись и тут же летел запрос
             goods: tuple[int, list[int]] = await self.queue1.get()
