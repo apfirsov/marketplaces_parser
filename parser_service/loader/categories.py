@@ -1,8 +1,12 @@
 import sys
+from contextlib import contextmanager
 from http import HTTPStatus
 from typing import Optional
 
+# import db.session
 import requests
+from fastapi import Depends
+from fastapi.concurrency import contextmanager_in_threadpool
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +17,7 @@ from logger_config import parser_logger as logger
 from .constants import MAIN_MENU
 from .exceptions import EmptyResponseError, ResponseStatusCodeError
 from .schemas import SourceCategory
+from contextlib import contextmanager
 
 
 def _handle_response(response: list[dict]) -> list[dict]:
@@ -30,8 +35,10 @@ def _handle_response(response: list[dict]) -> list[dict]:
 
 
 async def load_all_items() -> None:
-    db = get_db()
-    session: AsyncSession = await anext(db)
+    # db = get_db()
+    # session: AsyncSession = await anext(db)
+    # db: AsyncSession = Depends(get_db)
+    # session = db.session.get_db()
 
     catalogue_url: str = MAIN_MENU
     try:
@@ -52,8 +59,14 @@ async def load_all_items() -> None:
     except Exception as error:
         logger.exception(error)
         sys.exit()
+    # print(db)
 
-    async with session.begin():
-        await session.execute(delete(Category))
-        session.add_all(inst_lst)
-        await session.commit()
+    # async with db as session:
+    # async with contextmanager(get_db)() as session:
+    async with contextmanager_in_threadpool(
+        contextmanager(get_db)()) as session:
+        print("session")
+        async with session.begin():
+            await session.execute(delete(Category))
+            session.add_all(inst_lst)
+            await session.commit()
