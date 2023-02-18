@@ -37,313 +37,315 @@ class CategoriesStack:
         # yield None
 
 
-async def get_items_ids(item: dict, queue: Queue) -> None:
+class ItemsParser:
 
-    # if item is None:
-    #     await queue.put(None)
+    def __init__(self):
+        self.queue1: Queue = Queue()
+        self.queue2: Queue = Queue()
+        self.queue3: Queue = Queue()
 
-    shard: str = item.get('shard')
+    async def get_items_ids(self, item: dict) -> None:
 
-    if shard != 'blackhole':
+        # if item is None:
+        #     await queue.put(None)
+
+        shard: str = item.get('shard')
+
+        if shard != 'blackhole':
+            start: float = time.time()
+            item_id: int = item.get('id')
+            query: str = item.get('query')
+            price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
+                                     f'filters?{query}{QUERY_PARAMS}')
+            try:
+                response: dict = requests.get(price_filter_url).json()
+                ctg_filters: list[dict] = response.get('data').get('filters')
+                for ctg_filter in ctg_filters:
+                    if ctg_filter.get('key') == 'priceU':
+                        ctg_max_price: int = ctg_filter.get('maxPriceU')
+                        break
+
+                ids_list: list[int] = self._basic_parsing(
+                    item_id, shard, query, 0, ctg_max_price
+                )
+            except json.decoder.JSONDecodeError:
+                logger.debug('a JSONDecode error occured at: %s',
+                             price_filter_url)
+
+            finish: float = time.time()
+            impl_time: float = round(finish - start, 2)
+            logger.info('parsed %s %s in %d seconds', shard, query, impl_time)
+
+        await self.queue1.put((item_id, ids_list))
+
+    def _basic_parsing(self, item_id: int,
+                       shard: str,
+                       query: str,
+                       min_pr: int,
+                       max_pr: int) -> list[int]:
+        logger.debug('basic parsing for %s %s, price range: %s;%s',
+                     shard, query, min_pr, max_pr)
+
+        result: list[int] = []
+
+        price_lmt: str = f'&priceU={min_pr};{max_pr}'
+
+        base_url: str = (f'{BASE_URL}{shard}/catalog?'
+                         f'{QUERY_PARAMS}&{query}{price_lmt}')
+
+        def check_last_page_is_full() -> bool:
+            last_page_url: str = base_url + '&page=' + str(MAX_PAGE)
+            try:
+                response: dict = requests.get(last_page_url).json()
+                response_data: list[dict] = response.get('data').get('products')
+
+                return len(response_data) > LAST_PAGE_TRESHOLD
+
+            except json.decoder.JSONDecodeError:
+                logger.debug('a JSONDecode error occured at: %s',
+                             last_page_url)
+                check_last_page_is_full()
+
+        if check_last_page_is_full():
+            rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
+            if rnd_avg - min_pr >= MIN_PRICE_RANGE:
+                result.extend(
+                    self._basic_parsing(item_id, shard, query, min_pr, rnd_avg)
+                )
+                result.extend(
+                    self._basic_parsing(item_id, shard, query, rnd_avg, max_pr)
+                )
+            else:
+                result.extend(self._parse_by_brand(
+                    item_id, shard, query, price_lmt)
+                )
+
+        else:
+            ids_list: list[int] = self._parse_through_pages(base_url)
+            result.extend(ids_list)
+
+        return result
+
+    def _parse_by_brand(self, item_id: int,
+                        shard: str,
+                        query: str,
+                        price_lmt: str) -> list[int]:
+
         start: float = time.time()
-        item_id: int = item.get('id')
-        query: str = item.get('query')
-        price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
-                                 f'filters?{query}{QUERY_PARAMS}')
-        try:
-            response: dict = requests.get(price_filter_url).json()
-            ctg_filters: list[dict] = response.get('data').get('filters')
-            for ctg_filter in ctg_filters:
-                if ctg_filter.get('key') == 'priceU':
-                    ctg_max_price: int = ctg_filter.get('maxPriceU')
-                    break
+        logger.debug(
+            'parsing by brand for %s, price range %s', item_id, price_lmt)
 
-            ids_list: list[int] = basic_parsing(
-                item_id, shard, query, 0, ctg_max_price
-            )
-        except json.decoder.JSONDecodeError:
-            logger.debug('a JSONDecode error occured at: %s', price_filter_url)
+        base_url: str = (f'{BASE_URL}{shard}/catalog?'
+                         f'{query}{QUERY_PARAMS}{price_lmt}')
+
+        brand_filter_url: str = (f'{BASE_URL}{shard}/v4/filters?filters='
+                                 f'fbrand&{query}{QUERY_PARAMS}{price_lmt}')
+        response: dict = requests.get(brand_filter_url).json()
+        brand_filters: list[dict] = response.get(
+            'data').get('filters')[0].get('items')
+
+        concatenated_ids_list: list[str] = []
+        concatenated_ids: str = ''
+        cnt: int = 1
+
+        for brand in brand_filters:
+            brand_id: int = brand.get('id')
+            brand_count: int = brand.get('count')
+            if brand_count > MAX_ITEMS_IN_BRANDS_FILTER:
+                concatenated_ids_list.append(str(brand_id))
+            elif cnt < MAX_BRANDS_IN_REQUEST:
+                concatenated_ids = ';'.join([concatenated_ids, str(brand_id)])
+                cnt += 1
+            else:
+                concatenated_ids_list.append(concatenated_ids[1:])
+                concatenated_ids = str(brand_id)
+                cnt = 1
+
+        concatenated_ids_list.append(concatenated_ids[1:])
+
+        number_of_requests: int = len(concatenated_ids_list)
+        result: list[int] = []
+
+        for idx, string in enumerate(concatenated_ids_list, 1):
+            request_url: str = base_url + '&fbrand=' + string
+            ids_list: list[int] = self._parse_through_pages(request_url)
+            result.extend(ids_list)
+
+            logger.debug('%d / %d requests done', idx, number_of_requests)
 
         finish: float = time.time()
         impl_time: float = round(finish - start, 2)
-        logger.info('parsed %s %s in %d seconds', shard, query, impl_time)
+        logger.info('parsing by brand for section %s, price range %s '
+                    'done in %d seconds', item_id, price_lmt, impl_time)
 
-    await queue.put((item_id, ids_list))
+        return result
 
+    def _parse_through_pages(self, base_url: str) -> list[int]:
+        # сразу складывать в очередь по одному итему: (category.id, item.id)
+        # обратить внимание, что item_id сейчас нигде не используется!!
 
-def basic_parsing(item_id: int,
-                  shard: str,
-                  query: str,
-                  min_pr: int,
-                  max_pr: int) -> list[int]:
-    logger.debug('basic parsing for %s %s, price range: %s;%s',
-                 shard, query, min_pr, max_pr)
+        ids_list: list[int] = []
 
-    result: list[int] = []
+        page: int = 1
+        error_counter: int = 0
 
-    price_lmt: str = f'&priceU={min_pr};{max_pr}'
+        while page <= MAX_PAGE and error_counter < MAX_REQUEST_RETRIES:
 
-    base_url: str = (f'{BASE_URL}{shard}/catalog?'
-                     f'{QUERY_PARAMS}&{query}{price_lmt}')
+            url: str = base_url + '&page=' + str(page)
 
-    def check_last_page_is_full() -> bool:
-        last_page_url: str = base_url + '&page=' + str(MAX_PAGE)
-        try:
-            response: dict = requests.get(last_page_url).json()
-            response_data: list[dict] = response.get('data').get('products')
+            try:
+                response: dict = requests.get(url).json()
+                response_data: list[dict] = response.get(
+                    'data').get('products')
 
-            return len(response_data) > LAST_PAGE_TRESHOLD
+                if not len(response_data):
+                    break
 
-        except json.decoder.JSONDecodeError:
-            logger.debug('a JSONDecode error occured at: %s', last_page_url)
-            check_last_page_is_full()
+                for item in response_data:
+                    ids_list.append(item.get('id'))
 
-    if check_last_page_is_full():
-        rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
-        if rnd_avg - min_pr >= MIN_PRICE_RANGE:
-            result.extend(
-                basic_parsing(item_id, shard, query, min_pr, rnd_avg)
-            )
-            result.extend(
-                basic_parsing(item_id, shard, query, rnd_avg, max_pr)
-            )
-        else:
-            result.extend(parse_by_brand(item_id, shard, query, price_lmt))
+                error_counter = 0
+                page += 1
 
-    else:
-        ids_list: list[int] = parse_through_pages(item_id, base_url)
-        result.extend(ids_list)
+            except json.decoder.JSONDecodeError:
+                logger.debug('a JSONDecode error occured at: %s', url)
+                error_counter += 1
 
-    return result
+        return ids_list
 
-
-def parse_by_brand(item_id: int,
-                   shard: str,
-                   query: str,
-                   price_lmt: str) -> list[int]:
-
-    start: float = time.time()
-    logger.debug(
-        'parsing by brand for section %s, price range %s', item_id, price_lmt)
-
-    base_url: str = (f'{BASE_URL}{shard}/catalog?'
-                     f'{query}{QUERY_PARAMS}{price_lmt}')
-
-    brand_filter_url: str = (f'{BASE_URL}{shard}/v4/filters?filters='
-                             f'fbrand&{query}{QUERY_PARAMS}{price_lmt}')
-    response: dict = requests.get(brand_filter_url).json()
-    brand_filters: list[dict] = response.get(
-        'data').get('filters')[0].get('items')
-
-    concatenated_ids_list: list[str] = []
-    concatenated_ids: str = ''
-    cnt: int = 1
-
-    for brand in brand_filters:
-        brand_id: int = brand.get('id')
-        brand_count: int = brand.get('count')
-        if brand_count > MAX_ITEMS_IN_BRANDS_FILTER:
-            concatenated_ids_list.append(str(brand_id))
-        elif cnt < MAX_BRANDS_IN_REQUEST:
-            concatenated_ids = ';'.join([concatenated_ids, str(brand_id)])
-            cnt += 1
-        else:
-            concatenated_ids_list.append(concatenated_ids[1:])
-            concatenated_ids = str(brand_id)
-            cnt = 1
-
-    concatenated_ids_list.append(concatenated_ids[1:])
-
-    number_of_requests: int = len(concatenated_ids_list)
-    result: list[int] = []
-
-    for idx, string in enumerate(concatenated_ids_list, 1):
-        request_url: str = base_url + '&fbrand=' + string
-        ids_list: list[int] = parse_through_pages(item_id, request_url)
-        result.extend(ids_list)
-
-        logger.debug('%d / %d requests done', idx, number_of_requests)
-
-    finish: float = time.time()
-    impl_time: float = round(finish - start, 2)
-    logger.info('parsing by brand for section %s, price range %s '
-                'done in %d seconds', item_id, price_lmt, impl_time)
-
-    return result
-
-
-def parse_through_pages(item_id: int, base_url: str) -> list[int]:
-    # сразу складывать в очередь по одному итему: (category.id, item.id)
-    # обратить внимание, что item_id сейчас нигде не используется!!
-
-    item_ids_list: list[int] = []
-
-    page: int = 1
-    error_counter: int = 0
-
-    while page <= MAX_PAGE and error_counter < MAX_REQUEST_RETRIES:
-
-        url: str = base_url + '&page=' + str(page)
-
-        try:
-            response: dict = requests.get(url).json()
-            response_data: list[dict] = response.get(
-                'data').get('products')
-
-            if not len(response_data):
-                break
-
-            for item in response_data:
-                item_ids_list.append(item.get('id'))
-
-            error_counter = 0
-            page += 1
-
-        except json.decoder.JSONDecodeError:
-            logger.debug('a JSONDecode error occured at: %s', url)
-            error_counter += 1
-
-    return item_ids_list
-
-
-async def concatenate_ids(queue1: Queue, queue2: Queue) -> None:
-    while True:  # объединить с get_cards чтобы айди объединялись и тут же летел запрос
-        goods: tuple[int, list[int]] = await queue1.get()
-
-        logger.debug(f'concatenating ids for {goods[0]}')
-
-        concatenated_ids: str = ''
-        cnt: int = 0
-
-        for item_id in goods[1]:
-            if cnt < MAX_ITEMS_IN_REQUEST:
-                concatenated_ids = ';'.join([concatenated_ids, str(item_id)])
-                cnt += 1
-            else:
-                await queue2.put((goods[0], concatenated_ids[1:]))
-                concatenated_ids = str(item_id)
-                cnt = 0
-
-        await queue2.put((goods[0], concatenated_ids[1:]))
-        queue1.task_done()
-
-        logger.debug(f'finished concatenating ids for {goods[0]}')
-
-        # надо ли юзать примитив? Можно добавить второй строчкой что если прилетел None, то break
+    # надо ли юзать примитив? Можно добавить второй строчкой что если прилетел None, то break
         # await event.wait()
         # break
+    async def concatenate_ids(self) -> None:
+        while True:  # объединить с get_cards чтобы айди объединялись и тут же летел запрос
+            goods: tuple[int, list[int]] = await self.queue1.get()
 
+            logger.debug(f'concatenating ids for {goods[0]}')
 
-async def get_cards(queue2: Queue, queue3: Queue) -> None:
-    while True:
-        items: tuple[int, str] = await queue2.get()
+            concatenated_ids: str = ''
+            cnt: int = 0
 
-        logger.debug(f'getting cards for {items[0]}')
+            for item_id in goods[1]:
+                if cnt < MAX_ITEMS_IN_REQUEST:
+                    concatenated_ids = ';'.join(
+                        [concatenated_ids, str(item_id)])
+                    cnt += 1
+                else:
+                    await self.queue2.put((goods[0], concatenated_ids[1:]))
+                    concatenated_ids = str(item_id)
+                    cnt = 0
 
-        base_url: str = (f'https://card.wb.ru/cards/detail?'
-                         f'spp=30{QUERY_PARAMS}&nm=')
+            await self.queue2.put((goods[0], concatenated_ids[1:]))
+            self.queue1.task_done()
 
-        url: str = base_url + items[1]
-        response: requests.Response = requests.get(url)
+            logger.debug(f'finished concatenating ids for {goods[0]}')
 
-        cards: list[dict] = response.json().get('data').get('products')
+    async def get_cards(self) -> None:
+        while True:
+            items: tuple[int, str] = await self.queue2.get()
 
-        await queue3.put((items[0], cards))
-        queue2.task_done()
+            logger.debug(f'getting cards for {items[0]}')
 
-        logger.debug(f'finished getting cards for {items[0]}')
+            base_url: str = (f'https://card.wb.ru/cards/detail?'
+                             f'spp=30{QUERY_PARAMS}&nm=')
 
+            url: str = base_url + items[1]
+            response: requests.Response = requests.get(url)
 
-async def collect_data(queue: Queue) -> None:
-    while True:
-        start: float = time.time()
-        items: tuple[int, list[dict]] = await queue.get()
-        logger.debug('collecting data for %d', items[0])
+            cards: list[dict] = response.json().get('data').get('products')
 
-        item_objects: list[dict] = []
-        size_objects: list[dict] = []
-        brand_objects: list[dict] = []
-        item_history_objects: list[dict] = []
-        color_objects: list[dict] = []
+            await self.queue3.put((items[0], cards))
+            self.queue2.task_done()
 
-        for item in items[1]:
-            colors: list[dict] = item.get('colors')
-            for color in colors:
-                color_object = ColorSchema(**color)
-                color_objects.append(color_object.dict())
-            item['color'] = 999999 if len(color) > 1 else color.get('id')
+            logger.debug(f'finished getting cards for {items[0]}')
 
-            sum_count: int = 0
-            hash_sizes: dict = {}
-            for size in item.get('sizes'):
-                size_count: int = 0
-                for stock in size.get('stocks'):
-                    item_count: int = stock.get('qty')
-                    if item_count:
-                        size_count += item_count
-                hash_sizes[size.get('name')] = size_count
-                sum_count += size_count
+    async def collect_data(self) -> None:
+        while True:
+            start: float = time.time()
+            items: tuple[int, list[dict]] = await self.queue3.get()
+            logger.debug('collecting data for %d', items[0])
 
-                size_object = SizeSchema(**size)
-                size_objects.append(size_object.dict())
+            item_objects: list[dict] = []
+            size_objects: list[dict] = []
+            brand_objects: list[dict] = []
+            item_history_objects: list[dict] = []
+            color_objects: list[dict] = []
 
-            item['category'] = items[0]
-            item['item'] = item.get('id')
-            item['timestamp'] = time.time()
-            item['sum_count'] = sum_count
+            for item in items[1]:
+                colors: list[dict] = item.get('colors')
+                for color in colors:
+                    color_object = ColorSchema(**color)
+                    color_objects.append(color_object.dict())
+                item['color'] = 999999 if len(color) > 1 else color.get('id')
 
-            item_object = ItemSchema(**item)
-            brand_object = BrandSchema(**item)
-            item_history_object = ItemsHistorySchema(**item)
-            # history_size_object = HistorySizeRelationSchema()
+                sum_count: int = 0
+                hash_sizes: dict = {}
+                for size in item.get('sizes'):
+                    size_count: int = 0
+                    for stock in size.get('stocks'):
+                        item_count: int = stock.get('qty')
+                        if item_count:
+                            size_count += item_count
+                    hash_sizes[size.get('name')] = size_count
+                    sum_count += size_count
 
-            item_objects.append(item_object.dict())
-            brand_objects.append(brand_object.dict())
-            item_history_objects.append(item_history_object.dict())
+                    size_object = SizeSchema(**size)
+                    size_objects.append(size_object.dict())
 
-        queue.task_done()
+                item['category'] = items[0]
+                item['item'] = item.get('id')
+                item['timestamp'] = time.time()
+                item['sum_count'] = sum_count
 
-        finish: float = time.time()
-        impl_time: float = finish - start
-        logger.info('collected data for %d: %s items in %d seconds',
-                    items[0], len(item_objects), impl_time)
+                item_object = ItemSchema(**item)
+                brand_object = BrandSchema(**item)
+                item_history_object = ItemsHistorySchema(**item)
+                # history_size_object = HistorySizeRelationSchema()
 
-        from pprint import pprint
-        print('======= ITEM =======')
-        pprint(item_objects[0])
-        print('======= SIZE =======')
-        pprint(size_objects[0])
-        print('======= BRAND =======')
-        pprint(brand_objects[0])
-        print('======= ITEM_HISTORY =======')
-        pprint(item_history_objects[0])
-        print('======= COLOR =======')
-        pprint(color_objects[1])
+                item_objects.append(item_object.dict())
+                brand_objects.append(brand_object.dict())
+                item_history_objects.append(item_history_object.dict())
+
+            self.queue3.task_done()
+
+            finish: float = time.time()
+            impl_time: float = finish - start
+            logger.info('collected data for %d: %s items in %d seconds',
+                        items[0], len(item_objects), impl_time)
+
+            from pprint import pprint
+            print('======= ITEM =======')
+            pprint(item_objects[0])
+            print('======= SIZE =======')
+            pprint(size_objects[0])
+            print('======= BRAND =======')
+            pprint(brand_objects[0])
+            print('======= ITEM_HISTORY =======')
+            pprint(item_history_objects[0])
+            print('======= COLOR =======')
+            pprint(color_objects[1])
 
 
 async def parsing_manager(categories: CategoriesStack) -> None:
 
-    queue1: Queue = Queue()
-    queue2: Queue = Queue()
-    queue3: Queue = Queue()
+    parser = ItemsParser()
 
     # create_task = worker, тут их около 2000, а ВБ скорее всего даст только 100
     # надо реализовать партионную обработку
     get_items_ids_tasks: list[Task] = [
-        create_task(get_items_ids(item, queue1)) for item in categories]
+        create_task(parser.get_items_ids(item)) for item in categories]
 
     infinite_tasks: list[Task] = []
-    infinite_tasks.append(create_task(concatenate_ids(queue1, queue2)))
-    infinite_tasks.append(create_task(get_cards(queue2, queue3)))
-    infinite_tasks.append(create_task(collect_data(queue3)))
+    infinite_tasks.append(create_task(parser.concatenate_ids()))
+    infinite_tasks.append(create_task(parser.get_cards()))
+    infinite_tasks.append(create_task(parser.collect_data()))
 
     await asyncio.gather(*get_items_ids_tasks)
 
-    await queue1.join()
-    await queue2.join()
-    await queue3.join()
+    await parser.queue1.join()
+    await parser.queue2.join()
+    await parser.queue3.join()
 
-    # кэнселить бесконечные таски через 
     for task in infinite_tasks:
         task.cancel()
 
