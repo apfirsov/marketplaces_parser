@@ -1,6 +1,7 @@
 import logging
 from logging.config import dictConfig
 
+DEFAULT_LEVEL = "DEBUG"
 
 logging_schema = {
     "version": 1,
@@ -15,13 +16,13 @@ logging_schema = {
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "standard",
-            "level": "INFO",
+            "level": DEFAULT_LEVEL,
             "stream": "ext://sys.stdout"
         },
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
             "formatter": "standard",
-            "level": "INFO",
+            "level": DEFAULT_LEVEL,
             "filename": "parser_log.log",
             "mode": "a",
             "encoding": "utf-8",
@@ -32,12 +33,12 @@ logging_schema = {
     "loggers": {
         "__main__": {
             "handlers": ["console", "file"],
-            "level": "INFO",
+            "level": DEFAULT_LEVEL,
             "propagate": False
         }
     },
     "root": {
-        "level": "INFO",
+        "level": DEFAULT_LEVEL,
         "handlers": ["console", "file"]
     }
 }

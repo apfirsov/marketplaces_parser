@@ -14,12 +14,33 @@ from sqlalchemy.sql.selectable import Select
 
 from .constants import (BASE_URL, LAST_PAGE_TRESHOLD, MAX_BRANDS_IN_REQUEST,
                         MAX_ITEMS_IN_BRANDS_FILTER, MAX_ITEMS_IN_REQUEST,
-                        MAX_PAGE, MIN_PRICE_RANGE, QUERY_PARAMS)
+                        MAX_PAGE, MAX_REQUEST_RETRIES, MIN_PRICE_RANGE,
+                        QUERY_PARAMS)
 from .schemas import (BrandSchema, ColorSchema, HistorySizeRelationSchema,
                       ItemSchema, ItemsHistorySchema, SizeSchema)
 
+# все запросы асинхронные!!
+# класс, у которого очереди станут атрибутами и обращаться к ним через селф
+
+
+class CategoriesStack:
+
+    def __init__(self):
+        self.items = []
+
+    def put(self, item):
+        self.items.append(item)
+
+    def __iter__(self):            
+        for item in self.items:
+            yield item
+        # yield None
+
 
 async def get_items_ids(item: dict, queue: Queue) -> None:
+
+    # if item is None:
+    #     await queue.put(None)
 
     shard: str = item.get('shard')
 
@@ -152,36 +173,41 @@ def parse_by_brand(item_id: int,
 
 
 def parse_through_pages(item_id: int, base_url: str) -> list[int]:
-    result: list[int] = []
-    for page in range(1, MAX_PAGE + 1):
+    # сразу складывать в очередь по одному итему: (category.id, item.id)
+    # обратить внимание, что item_id сейчас нигде не используется!!
 
-        def scrape_page(page: int) -> Optional[bool]:
-            url: str = base_url + '&page=' + str(page)
+    item_ids_list: list[int] = []
 
-            try:
-                response: dict = requests.get(url).json()
-                response_data: list[dict] = response.get(
-                    'data').get('products')
+    page: int = 1
+    error_counter: int = 0
 
-                if not len(response_data):
-                    return True
+    while page <= MAX_PAGE and error_counter < MAX_REQUEST_RETRIES:
 
-                for item in response_data:
-                    result.append(item.get('id'))
+        url: str = base_url + '&page=' + str(page)
 
-            except json.decoder.JSONDecodeError:
-                logger.debug('a JSONDecode error occured at: %s', url)
-                scrape_page(page)
+        try:
+            response: dict = requests.get(url).json()
+            response_data: list[dict] = response.get(
+                'data').get('products')
 
-        continue_iteration: Optional[bool] = scrape_page(page)
-        if continue_iteration:
-            break
+            if not len(response_data):
+                break
 
-    return result
+            for item in response_data:
+                item_ids_list.append(item.get('id'))
+
+            error_counter = 0
+            page += 1
+
+        except json.decoder.JSONDecodeError:
+            logger.debug('a JSONDecode error occured at: %s', url)
+            error_counter += 1
+
+    return item_ids_list
 
 
 async def concatenate_ids(queue1: Queue, queue2: Queue) -> None:
-    while True:
+    while True:  # объединить с get_cards чтобы айди объединялись и тут же летел запрос
         goods: tuple[int, list[int]] = await queue1.get()
 
         logger.debug(f'concatenating ids for {goods[0]}')
@@ -202,6 +228,10 @@ async def concatenate_ids(queue1: Queue, queue2: Queue) -> None:
         queue1.task_done()
 
         logger.debug(f'finished concatenating ids for {goods[0]}')
+
+        # надо ли юзать примитив? Можно добавить второй строчкой что если прилетел None, то break
+        # await event.wait()
+        # break
 
 
 async def get_cards(queue2: Queue, queue3: Queue) -> None:
@@ -291,14 +321,16 @@ async def collect_data(queue: Queue) -> None:
         pprint(color_objects[1])
 
 
-async def parsing_manager(categories: list[dict]) -> None:
+async def parsing_manager(categories: CategoriesStack) -> None:
 
     queue1: Queue = Queue()
     queue2: Queue = Queue()
     queue3: Queue = Queue()
 
-    get_items_ids_tasks: list[Task] = [create_task(
-        get_items_ids(item, queue1)) for item in categories]
+    # create_task = worker, тут их около 2000, а ВБ скорее всего даст только 100
+    # надо реализовать партионную обработку
+    get_items_ids_tasks: list[Task] = [
+        create_task(get_items_ids(item, queue1)) for item in categories]
 
     infinite_tasks: list[Task] = []
     infinite_tasks.append(create_task(concatenate_ids(queue1, queue2)))
@@ -311,6 +343,7 @@ async def parsing_manager(categories: list[dict]) -> None:
     await queue2.join()
     await queue3.join()
 
+    # кэнселить бесконечные таски через 
     for task in infinite_tasks:
         task.cancel()
 
@@ -321,8 +354,8 @@ def load_all_items() -> None:
     with Session(engine) as session:
         selectable: Select = select(Category).where(Category.id.in_([128456]))
         # selectable: Select = select(Category)
-        categories: list[dict] = [
-            _.__dict__ for _ in session.scalars(selectable)
-        ]
+        categories = CategoriesStack()
+        for category in session.scalars(selectable):
+            categories.put(category.__dict__)
 
     asyncio.run(parsing_manager(categories))
