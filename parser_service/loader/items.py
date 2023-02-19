@@ -1,8 +1,9 @@
 import asyncio
 import json
+import sys
 import time
 from asyncio import Queue, Task, create_task
-from typing import Optional
+from typing import Generator
 
 import requests
 from db.models import Category
@@ -24,13 +25,13 @@ from .schemas import (BrandSchema, ColorSchema, HistorySizeRelationSchema,
 
 class CategoriesStack:
 
-    def __init__(self):
-        self.items = []
+    def __init__(self) -> None:
+        self.items: list = []
 
-    def put(self, item):
+    def put(self, item) -> None:
         self.items.append(item)
 
-    def __iter__(self):            
+    def __iter__(self) -> Generator:
         for item in self.items:
             yield item
         # yield None
@@ -38,7 +39,7 @@ class CategoriesStack:
 
 class ItemsParser:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.queue1: Queue = Queue()
         self.queue2: Queue = Queue()
         self.queue3: Queue = Queue()
@@ -56,20 +57,35 @@ class ItemsParser:
             query: str = item.get('query')
             price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
                                      f'filters?{query}{QUERY_PARAMS}')
-            try:
-                response: dict = requests.get(price_filter_url).json()
-                ctg_filters: list[dict] = response.get('data').get('filters')
-                for ctg_filter in ctg_filters:
-                    if ctg_filter.get('key') == 'priceU':
-                        ctg_max_price: int = ctg_filter.get('maxPriceU')
-                        break
 
-                ids_list: list[int] = self._basic_parsing(
-                    item_id, shard, query, 0, ctg_max_price
-                )
-            except json.decoder.JSONDecodeError:
-                logger.debug('a JSONDecode error occured at: %s',
-                             price_filter_url)
+            error_counter: int = MAX_REQUEST_RETRIES
+            while error_counter:
+                try:
+                    response: dict = requests.get(price_filter_url).json()
+                    ctg_filters: list[dict] = response.get(
+                        'data').get('filters')
+                    for ctg_filter in ctg_filters:
+                        if ctg_filter.get('key') == 'priceU':
+                            ctg_max_price: int = ctg_filter.get('maxPriceU')
+                            break
+
+                    ids_list: list[int] = self._basic_parsing(
+                        item_id, shard, query, 0, ctg_max_price
+                    )
+                    break
+
+                except json.decoder.JSONDecodeError:
+                    error_counter -= 1
+                    if not error_counter:
+                        logger.critical(
+                            'exceeded JSONDecode error limit at: %s',
+                            price_filter_url
+                        )
+                        sys.exit()
+                    logger.debug(
+                        'JSONDecode error occured at: %s, %d tries left',
+                        price_filter_url, error_counter
+                    )
 
             finish: float = time.time()
             impl_time: float = round(finish - start, 2)
@@ -92,20 +108,26 @@ class ItemsParser:
         base_url: str = (f'{BASE_URL}{shard}/catalog?'
                          f'{QUERY_PARAMS}&{query}{price_lmt}')
 
-        def check_last_page_is_full() -> bool:
-            last_page_url: str = base_url + '&page=' + str(MAX_PAGE)
+        last_page_url: str = base_url + '&page=' + str(MAX_PAGE)
+        error_counter: int = MAX_REQUEST_RETRIES
+        while error_counter:
             try:
                 response: dict = requests.get(last_page_url).json()
-                response_data: list[dict] = response.get('data').get('products')
+                resp_data: list[dict] = response.get('data').get('products')
 
-                return len(response_data) > LAST_PAGE_TRESHOLD
+                last_page_is_full: bool = len(resp_data) > LAST_PAGE_TRESHOLD
+                break
 
             except json.decoder.JSONDecodeError:
-                logger.debug('a JSONDecode error occured at: %s',
-                             last_page_url)
-                check_last_page_is_full()
+                error_counter -= 1
+                if not error_counter:
+                    logger.critical('exceeded JSONDecode error limit at: %s',
+                                    last_page_url)
+                    sys.exit()
+                logger.debug('JSONDecode error occured at: %s, %d tries left',
+                             last_page_url, error_counter)
 
-        if check_last_page_is_full():
+        if last_page_is_full:
             rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
             if rnd_avg - min_pr >= MIN_PRICE_RANGE:
                 result.extend(
@@ -181,14 +203,13 @@ class ItemsParser:
 
     def _parse_through_pages(self, base_url: str) -> list[int]:
         # сразу складывать в очередь по одному итему: (category.id, item.id)
-        # обратить внимание, что item_id сейчас нигде не используется!!
 
         ids_list: list[int] = []
 
         page: int = 1
-        error_counter: int = 0
+        error_counter: int = MAX_REQUEST_RETRIES
 
-        while page <= MAX_PAGE and error_counter < MAX_REQUEST_RETRIES:
+        while page <= MAX_PAGE:
 
             url: str = base_url + '&page=' + str(page)
 
@@ -207,8 +228,13 @@ class ItemsParser:
                 page += 1
 
             except json.decoder.JSONDecodeError:
-                logger.debug('a JSONDecode error occured at: %s', url)
-                error_counter += 1
+                error_counter -= 1
+                if not error_counter:
+                    logger.critical(
+                        'exceeded JSONDecode error limit at: %s', url)
+                    sys.exit()
+                logger.debug('JSONDecode error occured at: %s, %d tries left',
+                             url, error_counter)
 
         return ids_list
 
