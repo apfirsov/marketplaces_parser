@@ -24,6 +24,11 @@ from .schemas import (BrandSchema, ColorSchema, HistorySizeRelationSchema,
 
 # все запросы асинхронные!!
 
+    # вар 1: если прилетел None, то break
+    # вар 2: примитив ???
+    # await event.wait()
+    # break
+
 
 class CategoriesStack:
 
@@ -71,7 +76,6 @@ class ItemsParser:
                             ctg_max_price: int = ctg_filter.get('maxPriceU')
                             break
 
-                    # ids_list: list[int] = 
                     await self._basic_parsing(
                         category_id, shard, query, 0, ctg_max_price)
                     break
@@ -93,8 +97,6 @@ class ItemsParser:
             impl_time: float = round(finish - start, 2)
             logger.info('parsed %s %s in %d seconds', shard, query, impl_time)
 
-        # await self.queue1.put((category_id, ids_list))
-
     async def _basic_parsing(self, category_id: int,
                              shard: str,
                              query: str,
@@ -102,8 +104,6 @@ class ItemsParser:
                              max_pr: int) -> None:
         logger.info('basic parsing for %s %s, price range: %s;%s',
                     shard, query, min_pr, max_pr)
-
-        # result: list[int] = []
 
         price_lmt: str = f'&priceU={min_pr};{max_pr}'
 
@@ -132,27 +132,21 @@ class ItemsParser:
         if last_page_is_full:
             rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
             if rnd_avg - min_pr >= MIN_PRICE_RANGE:
-                # result.extend(
                 await self._basic_parsing(
                     category_id, shard, query, min_pr, rnd_avg)
-                # result.extend(
                 await self._basic_parsing(
                     category_id, shard, query, rnd_avg, max_pr)
             else:
-                # result.extend(
-                await self._parse_by_brand(category_id, shard, query, price_lmt)
+                await self._parse_by_brand(
+                    category_id, shard, query, price_lmt)
 
         else:
-            # ids_list: list[int] = 
-            await self._parse_through_pages(category_id, base_url)
-            # result.extend(ids_list)
-
-        # return result
+            await self._get_items_ids_chunk(category_id, base_url)
 
     async def _parse_by_brand(self, category_id: int,
-                        shard: str,
-                        query: str,
-                        price_lmt: str) -> list[int]:
+                              shard: str,
+                              query: str,
+                              price_lmt: str) -> list[int]:
 
         start: float = time.time()
         logger.info(
@@ -187,13 +181,10 @@ class ItemsParser:
         concatenated_ids_list.append(concatenated_ids[1:])
 
         number_of_requests: int = len(concatenated_ids_list)
-        # result: list[int] = []
 
         for idx, string in enumerate(concatenated_ids_list, 1):
             request_url: str = base_url + '&fbrand=' + string
-            # ids_list: list[int] = 
-            await self._parse_through_pages(category_id, request_url)
-            # result.extend(ids_list)
+            await self._get_items_ids_chunk(category_id, request_url)
 
             logger.info('%d / %d requests done', idx, number_of_requests)
 
@@ -202,12 +193,9 @@ class ItemsParser:
         logger.info('parsing by brand for section %s, price range %s '
                     'done in %d seconds', category_id, price_lmt, impl_time)
 
-        # return result
-
-    async def _parse_through_pages(self,
+    async def _get_items_ids_chunk(self,
                                    category_id: int,
                                    base_url: str) -> None:
-        # сразу складывать в очередь по одному итему: (category.id, item.id)
 
         logger.info('started parsing through pages from 1 up to 100 max')
 
@@ -226,10 +214,8 @@ class ItemsParser:
         concatenated_ids: str = ''
         cnt: int = 0
 
-        # ids_list: list[int] = []
         for response in responses_as_dict:
             for item in response.get('data').get('products'):
-                # ids_list.append(item.get('id'))
                 item_id: int = item.get('id')
 
                 if cnt < MAX_ITEMS_IN_REQUEST:
@@ -242,61 +228,33 @@ class ItemsParser:
                     cnt = 0
 
         await self.queue2.put((category_id, concatenated_ids[1:]))
-        # return ids_list
-
-    # вар 1: если прилетел None, то break
-    # вар 2: примитив ???
-    # await event.wait()
-    # break
-
-    # async def concatenate_ids(self) -> None:
-    #     while True:  # объединить с get_cards чтобы айди объединялись и тут же летел запрос
-    #         goods: tuple[int, int] = await self.queue1.get()
-
-    #         logger.info(f'concatenating ids for {goods[0]}')
-
-    #         concatenated_ids: str = ''
-    #         cnt: int = 0
-
-    #         for item_id in goods[1]:
-    #             if cnt < MAX_ITEMS_IN_REQUEST:
-    #                 concatenated_ids = ';'.join(
-    #                     [concatenated_ids, str(item_id)])
-    #                 cnt += 1
-    #             else:
-    #                 await self.queue2.put((goods[0], concatenated_ids[1:]))
-    #                 concatenated_ids = str(item_id)
-    #                 cnt = 0
-
-    #         await self.queue2.put((goods[0], concatenated_ids[1:]))
-    #         self.queue1.task_done()
-
-    #         logger.info(f'finished concatenating ids for {goods[0]}')
 
     async def get_cards(self) -> None:
         while True:
-            items: tuple[int, str] = await self.queue2.get()
+            queue_items: tuple[int, str] = await self.queue2.get()
 
-            logger.info(f'getting cards for {items[0]}')
+            logger.info(f'getting cards for {queue_items[0]}')
 
             base_url: str = (f'https://card.wb.ru/cards/detail?'
                              f'spp=30{QUERY_PARAMS}&nm=')
 
-            url: str = base_url + items[1]
-            response: requests.Response = requests.get(url)
+            async with aiohttp.ClientSession() as session:
+                url: str = base_url + queue_items[1]
 
-            cards: list[dict] = response.json().get('data').get('products')
+                async with session.get(url) as response:
+                    card_raw: dict = await response.json(content_type=None)
+                    card = card_raw.get('data').get('products')
 
-            await self.queue3.put((items[0], cards))
+            await self.queue3.put((queue_items[0], card))
             self.queue2.task_done()
 
-            logger.info(f'finished getting cards for {items[0]}')
+            logger.info(f'finished getting cards for {queue_items[0]}')
 
     async def collect_data(self) -> None:
         while True:
             start: float = time.time()
-            items: tuple[int, list[dict]] = await self.queue3.get()
-            logger.info('collecting data for %d', items[0])
+            queue_items: tuple[int, list[dict]] = await self.queue3.get()
+            logger.info('collecting data for %d', queue_items[0])
 
             item_objects: list[dict] = []
             size_objects: list[dict] = []
@@ -304,7 +262,7 @@ class ItemsParser:
             item_history_objects: list[dict] = []
             color_objects: list[dict] = []
 
-            for item in items[1]:
+            for item in queue_items[1]:
                 colors: list[dict] = item.get('colors')
                 for color in colors:
                     color_object = ColorSchema(**color)
@@ -325,7 +283,7 @@ class ItemsParser:
                     size_object = SizeSchema(**size)
                     size_objects.append(size_object.dict())
 
-                item['category'] = items[0]
+                item['category'] = queue_items[0]
                 item['item'] = item.get('id')
                 item['timestamp'] = time.time()
                 item['sum_count'] = sum_count
@@ -344,19 +302,19 @@ class ItemsParser:
             finish: float = time.time()
             impl_time: float = finish - start
             logger.info('collected data for %d: %s items in %d seconds',
-                        items[0], len(item_objects), impl_time)
+                        queue_items[0], len(item_objects), impl_time)
 
-            from pprint import pprint
-            print('======= ITEM =======')
-            pprint(item_objects[0])
-            print('======= SIZE =======')
-            pprint(size_objects[0])
-            print('======= BRAND =======')
-            pprint(brand_objects[0])
-            print('======= ITEM_HISTORY =======')
-            pprint(item_history_objects[0])
-            print('======= COLOR =======')
-            pprint(color_objects[1])
+            # from pprint import pprint
+            # print('======= ITEM =======')
+            # pprint(item_objects[0])
+            # print('======= SIZE =======')
+            # pprint(size_objects[0])
+            # print('======= BRAND =======')
+            # pprint(brand_objects[0])
+            # print('======= ITEM_HISTORY =======')
+            # pprint(item_history_objects[0])
+            # print('======= COLOR =======')
+            # pprint(color_objects[1])
 
 
 async def parsing_manager(categories: CategoriesStack) -> None:
@@ -369,7 +327,6 @@ async def parsing_manager(categories: CategoriesStack) -> None:
         create_task(parser.get_items_ids(category)) for category in categories]
 
     infinite_tasks: list[Task] = []
-    # infinite_tasks.append(create_task(parser.concatenate_ids()))
     infinite_tasks.append(create_task(parser.get_cards()))
     infinite_tasks.append(create_task(parser.collect_data()))
 
