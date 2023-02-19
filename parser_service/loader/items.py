@@ -28,7 +28,7 @@ class CategoriesStack:
     def __init__(self) -> None:
         self.items: list = []
 
-    def put(self, item) -> None:
+    def put(self, item: dict) -> None:
         self.items.append(item)
 
     def __iter__(self) -> Generator:
@@ -48,6 +48,7 @@ class ItemsParser:
 
         # if item is None:
         #     await queue.put(None)
+        #     return
 
         shard: str = item.get('shard')
 
@@ -82,7 +83,7 @@ class ItemsParser:
                             price_filter_url
                         )
                         sys.exit()
-                    logger.debug(
+                    logger.info(
                         'JSONDecode error occured at: %s, %d tries left',
                         price_filter_url, error_counter
                     )
@@ -98,8 +99,8 @@ class ItemsParser:
                        query: str,
                        min_pr: int,
                        max_pr: int) -> list[int]:
-        logger.debug('basic parsing for %s %s, price range: %s;%s',
-                     shard, query, min_pr, max_pr)
+        logger.info('basic parsing for %s %s, price range: %s;%s',
+                    shard, query, min_pr, max_pr)
 
         result: list[int] = []
 
@@ -124,8 +125,8 @@ class ItemsParser:
                     logger.critical('exceeded JSONDecode error limit at: %s',
                                     last_page_url)
                     sys.exit()
-                logger.debug('JSONDecode error occured at: %s, %d tries left',
-                             last_page_url, error_counter)
+                logger.info('JSONDecode error occured at: %s, %d tries left',
+                            last_page_url, error_counter)
 
         if last_page_is_full:
             rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
@@ -153,7 +154,7 @@ class ItemsParser:
                         price_lmt: str) -> list[int]:
 
         start: float = time.time()
-        logger.debug(
+        logger.info(
             'parsing by brand for %s, price range %s', item_id, price_lmt)
 
         base_url: str = (f'{BASE_URL}{shard}/catalog?'
@@ -192,7 +193,7 @@ class ItemsParser:
             ids_list: list[int] = self._parse_through_pages(request_url)
             result.extend(ids_list)
 
-            logger.debug('%d / %d requests done', idx, number_of_requests)
+            logger.info('%d / %d requests done', idx, number_of_requests)
 
         finish: float = time.time()
         impl_time: float = round(finish - start, 2)
@@ -203,6 +204,8 @@ class ItemsParser:
 
     def _parse_through_pages(self, base_url: str) -> list[int]:
         # сразу складывать в очередь по одному итему: (category.id, item.id)
+
+        logger.info('started parsing through pages from 1 up to 100 max')
 
         ids_list: list[int] = []
 
@@ -233,8 +236,8 @@ class ItemsParser:
                     logger.critical(
                         'exceeded JSONDecode error limit at: %s', url)
                     sys.exit()
-                logger.debug('JSONDecode error occured at: %s, %d tries left',
-                             url, error_counter)
+                logger.info('JSONDecode error occured at: %s, %d tries left',
+                            url, error_counter)
 
         return ids_list
 
@@ -246,7 +249,7 @@ class ItemsParser:
         while True:  # объединить с get_cards чтобы айди объединялись и тут же летел запрос
             goods: tuple[int, list[int]] = await self.queue1.get()
 
-            logger.debug(f'concatenating ids for {goods[0]}')
+            logger.info(f'concatenating ids for {goods[0]}')
 
             concatenated_ids: str = ''
             cnt: int = 0
@@ -264,13 +267,13 @@ class ItemsParser:
             await self.queue2.put((goods[0], concatenated_ids[1:]))
             self.queue1.task_done()
 
-            logger.debug(f'finished concatenating ids for {goods[0]}')
+            logger.info(f'finished concatenating ids for {goods[0]}')
 
     async def get_cards(self) -> None:
         while True:
             items: tuple[int, str] = await self.queue2.get()
 
-            logger.debug(f'getting cards for {items[0]}')
+            logger.info(f'getting cards for {items[0]}')
 
             base_url: str = (f'https://card.wb.ru/cards/detail?'
                              f'spp=30{QUERY_PARAMS}&nm=')
@@ -283,13 +286,13 @@ class ItemsParser:
             await self.queue3.put((items[0], cards))
             self.queue2.task_done()
 
-            logger.debug(f'finished getting cards for {items[0]}')
+            logger.info(f'finished getting cards for {items[0]}')
 
     async def collect_data(self) -> None:
         while True:
             start: float = time.time()
             items: tuple[int, list[dict]] = await self.queue3.get()
-            logger.debug('collecting data for %d', items[0])
+            logger.info('collecting data for %d', items[0])
 
             item_objects: list[dict] = []
             size_objects: list[dict] = []
@@ -339,17 +342,17 @@ class ItemsParser:
             logger.info('collected data for %d: %s items in %d seconds',
                         items[0], len(item_objects), impl_time)
 
-            from pprint import pprint
-            print('======= ITEM =======')
-            pprint(item_objects[0])
-            print('======= SIZE =======')
-            pprint(size_objects[0])
-            print('======= BRAND =======')
-            pprint(brand_objects[0])
-            print('======= ITEM_HISTORY =======')
-            pprint(item_history_objects[0])
-            print('======= COLOR =======')
-            pprint(color_objects[1])
+            # from pprint import pprint
+            # print('======= ITEM =======')
+            # pprint(item_objects[0])
+            # print('======= SIZE =======')
+            # pprint(size_objects[0])
+            # print('======= BRAND =======')
+            # pprint(brand_objects[0])
+            # print('======= ITEM_HISTORY =======')
+            # pprint(item_history_objects[0])
+            # print('======= COLOR =======')
+            # pprint(color_objects[1])
 
 
 async def parsing_manager(categories: CategoriesStack) -> None:
@@ -377,13 +380,22 @@ async def parsing_manager(categories: CategoriesStack) -> None:
 
 
 def load_all_items() -> None:
+    start: float = time.time()
+
     engine = create_engine(POSTGRES_URL)
 
     with Session(engine) as session:
-        selectable: Select = select(Category).where(Category.id.in_([128456]))
+        selectable: Select = select(Category).where(Category.id.in_([8149]))
         # selectable: Select = select(Category)
         categories = CategoriesStack()
         for category in session.scalars(selectable):
             categories.put(category.__dict__)
 
     asyncio.run(parsing_manager(categories))
+
+    finish: float = time.time()
+    impl_time: float = finish - start
+    logger.info('done in %d seconds', impl_time)
+
+# 129265 - 7 sec sync
+# 8149 - 116 sec sync
