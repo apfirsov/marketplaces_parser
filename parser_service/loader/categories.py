@@ -29,7 +29,7 @@ def _handle_response(response: list[dict]) -> list[dict]:
     return result
 
 
-async def load_all_items() -> None:
+async def load_all_categories() -> None:
     db = get_db()
     session: AsyncSession = await anext(db)
 

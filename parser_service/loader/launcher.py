@@ -2,11 +2,11 @@ import asyncio
 
 from logger_config import parser_logger as logger
 
-from .categories import load_all_items
+from .categories import load_all_categories
 
 LAUNCH_OPTIONS = {
     "start": {
-        "--categories": load_all_items
+        "--categories": load_all_categories
     },
 }
 
