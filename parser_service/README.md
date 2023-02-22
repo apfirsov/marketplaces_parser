@@ -8,9 +8,7 @@
 
 ```POSTGRES_PASSWORD=parser```
 
-```ASYNC_DATABASE_URL=postgresql+asyncpg://user_name:password@0.0.0.0:5432/db_name```
-
-```DATABASE_URL=postgresql://user_name:password@0.0.0.0:5432/db_name```
+```POSTGRES_URL=postgresql+asyncpg://user_name:password@0.0.0.0:5432/db_name```
 
  ##  Cборка контейнера с БД PostgresQL
  
@@ -22,6 +20,8 @@
 
 ```
 alembic init migrations
+
+alembic init -t async <script_directory_here> 
 ```
 
  - После этого будет создана папка с миграциями и конфигурационный файл для алембика.
