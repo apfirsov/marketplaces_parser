@@ -43,40 +43,21 @@ class CategorySchema(BaseModel):
         return v
 
 
-class ItemSchema(BaseModel):
+class ArticleSchema(BaseModel):
     id: int
-    category: str
+    root: int
+    brandId: str
+    brand: str
     name: str
-    brandId: str  # brand
-    color: int
-
-
-class BrandSchema(BaseModel):
-    brandId: int  # id
-    brand: str  # name
+    sale: int
+    priceU: int
+    salePriceU: int
+    rating: int
+    feedbacks: int
+    colors: list[dict]
+    sizes: list[dict]
 
 
 class ColorSchema(BaseModel):
     id: int
     name: str
-
-
-class ItemsHistorySchema(BaseModel):
-    item: int
-    timestamp: float
-    sale: int
-    priceU: int  # price_full
-    salePriceU: int  # price_with_discount
-    rating: int
-    feedbacks: int
-    sum_count: int
-
-
-class SizeSchema(BaseModel):
-    name: str
-
-
-class HistorySizeRelationSchema(BaseModel):
-    history: int
-    size: int
-    count: int

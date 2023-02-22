@@ -2,13 +2,10 @@ import asyncio
 import json
 import sys
 import time
-from asyncio import Queue, Task, create_task
-from typing import Generator
+from asyncio import Event, Queue, Semaphore, Task, create_task
 
 import aiohttp
 import pydantic
-import requests
-from aiohttp.client_reqrep import ClientResponse
 from db.models import Category
 from logger_config import parser_logger as logger
 from settings import POSTGRES_URL
@@ -20,83 +17,62 @@ from .constants import (BASE_URL, LAST_PAGE_TRESHOLD, MAX_BRANDS_IN_REQUEST,
                         MAX_ITEMS_IN_BRANDS_FILTER, MAX_ITEMS_IN_REQUEST,
                         MAX_PAGE, MAX_REQUEST_RETRIES, MIN_PRICE_RANGE,
                         QUERY_PARAMS, SEMAPHORE_LIMIT)
-from .schemas import (BrandSchema, ColorSchema, HistorySizeRelationSchema,
-                      ItemSchema, ItemsHistorySchema, SizeSchema)
-
-# все запросы асинхронные!!
-
-    # вар 1: если прилетел None, то break
-    # вар 2: примитив ???
-    # await event.wait()
-    # break
-
-items_count: int = 0
-
-
-class CategoriesStack:
-
-    def __init__(self) -> None:
-        self.items: list = []
-
-    def put(self, item: dict) -> None:
-        self.items.append(item)
-
-    def __iter__(self) -> Generator:
-        for item in self.items:
-            yield item
-        # yield None
+from .schemas import ArticleSchema, ColorSchema
 
 
 class ItemsParser:
 
     def __init__(self) -> None:
-        self.queue2: Queue = Queue()
-        self.queue3: Queue = Queue()
+        self.timestamp: float = time.time()
+        self.ids_queue: Queue = Queue()
+        self.cards_queue: Queue = Queue()
+        self.db_queue: Queue = Queue()
 
     async def get_items_ids(self, category: dict, semaphore) -> None:
 
         async with semaphore:
+            start: float = time.time()
+            category_id: int = category.get('id')
             shard: str = category.get('shard')
+            query: str = category.get('query')
+            price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
+                                     f'filters?{query}{QUERY_PARAMS}')
 
-            if 'blackhole' not in shard and 'preset' not in shard:
-                start: float = time.time()
-                category_id: int = category.get('id')
-                query: str = category.get('query')
-                price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
-                                         f'filters?{query}{QUERY_PARAMS}')
+            error_counter: int = MAX_REQUEST_RETRIES
+            while error_counter:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(price_filter_url) as r:
+                            response: dict = await r.json(content_type=None)
 
-                error_counter: int = MAX_REQUEST_RETRIES
-                while error_counter:
-                    try:
-                        response: dict = requests.get(price_filter_url).json()
-                        ctg_filters: list[dict] = response.get(
-                            'data').get('filters')
-                        for ctg_filter in ctg_filters:
-                            if ctg_filter.get('key') == 'priceU':
-                                ctg_max_price: int = ctg_filter.get('maxPriceU')
-                                break
-                        break
+                    ctg_filters: list[dict] = (
+                        response.get('data').get('filters'))
+                    for ctg_filter in ctg_filters:
+                        if ctg_filter.get('key') == 'priceU':
+                            ctg_max_price: int = ctg_filter.get('maxPriceU')
+                            break
+                    break
 
-                    except json.decoder.JSONDecodeError:
-                        error_counter -= 1
-                        if not error_counter:
-                            logger.critical(
-                                'exceeded JSONDecode error limit at: %s',
-                                price_filter_url
-                            )
-                            sys.exit()
-                        logger.info(
-                            'JSONDecode error occured at: %s, %d tries left',
-                            price_filter_url, error_counter
+                except json.decoder.JSONDecodeError:
+                    error_counter -= 1
+                    if not error_counter:
+                        logger.critical(
+                            'exceeded JSONDecode error limit at: %s',
+                            price_filter_url
                         )
+                        sys.exit()
+                    logger.info(
+                        'JSONDecode error occured at: %s, %d tries left',
+                        price_filter_url, error_counter
+                    )
 
-                await self._basic_parsing(
-                    category_id, shard, query, 0, ctg_max_price)
+            await self._basic_parsing(
+                category_id, shard, query, 0, ctg_max_price)
 
-                finish: float = time.time()
-                impl_time: float = round(finish - start, 2)
-                logger.info('parsed %s %s in %d seconds',
-                            shard, query, impl_time)
+            finish: float = time.time()
+            impl_time: float = round(finish - start, 2)
+            logger.info('parsed %s %s in %d seconds',
+                        shard, query, impl_time)
 
     async def _basic_parsing(self, category_id: int,
                              shard: str,
@@ -117,12 +93,13 @@ class ItemsParser:
         while error_counter:
             async with aiohttp.ClientSession() as session:
                 try:
-                    async with session.get(last_page_url) as response:
-                        resp: dict = await response.json(content_type=None)
-                    resp_data: list[dict] = resp.get('data').get('products')
+                    async with session.get(last_page_url) as r:
+                        response: dict = await r.json(content_type=None)
+                    response_data: list[dict] = (
+                        response.get('data').get('products'))
 
                     last_page_is_full: bool = (
-                        len(resp_data) > LAST_PAGE_TRESHOLD)
+                        len(response_data) > LAST_PAGE_TRESHOLD)
                     break
 
                 except json.decoder.JSONDecodeError:
@@ -163,9 +140,12 @@ class ItemsParser:
 
         brand_filter_url: str = (f'{BASE_URL}{shard}/v4/filters?filters='
                                  f'fbrand&{query}{QUERY_PARAMS}{price_lmt}')
-        response: dict = requests.get(brand_filter_url).json()
-        brand_filters: list[dict] = response.get(
-            'data').get('filters')[0].get('items')
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(brand_filter_url) as r:
+                response: dict = await r.json(content_type=None)
+        brand_filters: list[dict] = (
+            response.get('data').get('filters')[0].get('items'))
 
         concatenated_ids_list: list[str] = []
         concatenated_ids: str = ''
@@ -192,8 +172,7 @@ class ItemsParser:
             request_url: str = base_url + '&fbrand=' + string
             await self._get_items_ids_chunk(category_id, request_url)
 
-            logger.info('brand parsing for %s, price range %s: '
-                        '%d / %d requests done',
+            logger.info('brand parsing for %s, %s: %d / %d requests done',
                         category_id, price_lmt, idx, number_of_requests)
 
         finish: float = time.time()
@@ -219,15 +198,13 @@ class ItemsParser:
                 try:
                     async with session.get(url) as response:
                         response: dict = await response.json(content_type=None)
-
-                    response_data: list[dict] = response.get(
-                        'data').get('products')
+                        response_data: list[dict] = (
+                            response.get('data').get('products'))
 
                     if not len(response_data):
-                        await self.queue2.put(
-                            (category_id, concatenated_ids[1:])
-                        )
-                        await asyncio.sleep(1)
+                        await self.ids_queue.put(
+                            (category_id, concatenated_ids[1:]))
+                        await asyncio.sleep(3)
                         break
 
                     for item in response_data:
@@ -238,7 +215,7 @@ class ItemsParser:
                                 [concatenated_ids, str(item_id)])
                             cnt += 1
                         else:
-                            await self.queue2.put(
+                            await self.ids_queue.put(
                                 (category_id, concatenated_ids[1:]))
                             concatenated_ids = str(item_id)
                             cnt = 0
@@ -258,7 +235,7 @@ class ItemsParser:
         while True:
             category_id: int
             concatenated_ids: str
-            category_id, concatenated_ids = await self.queue2.get()
+            category_id, concatenated_ids = await self.ids_queue.get()
 
             base_url: str = (f'https://card.wb.ru/cards/detail?'
                              f'spp=30{QUERY_PARAMS}&nm=')
@@ -267,117 +244,133 @@ class ItemsParser:
                 url: str = base_url + concatenated_ids
 
                 async with session.get(url) as response:
-                    cards_raw: dict = await response.json(content_type=None)
-                    cards: list[dict] = cards_raw.get('data').get('products')
+                    response: dict = await response.json(content_type=None)
+                    response_data: list[dict] = (
+                        response.get('data').get('products'))
 
-            await self.queue3.put((category_id, cards))
-            self.queue2.task_done()
+            await self.cards_queue.put((category_id, response_data))
+            self.ids_queue.task_done()
 
             logger.info(f'got cards chunk for {category_id}')
 
-    async def collect_data(self, cancel_collect_data: asyncio.Event) -> None:
+    async def collect_data(self) -> None:
         while True:
             start: float = time.time()
             category_id: int
             cards: list[dict]
-            category_id, cards = await self.queue3.get()
-
-            item_objects: list[dict] = []
-            size_objects: list[dict] = []
-            brand_objects: list[dict] = []
-            item_history_objects: list[dict] = []
-            color_objects: list[dict] = []
-
-            global items_count
+            category_id, cards = await self.cards_queue.get()
 
             for item in cards:
+                card_object: dict = {
+                    'colors': [],
+                    'sizes': []
+                }
 
-                items_count += 1
-            #     colors: list[dict] = item.get('colors')
-            #     for color in colors:
-            #         color_object = ColorSchema(**color)
-            #         color_objects.append(color_object.dict())
-            #     item['color'] = 999999 if len(color) > 1 else color.get('id')
+                try:
+                    article_data = ArticleSchema(**item).dict()
+                except pydantic.ValidationError:
+                    logger.critical('validation error')
+                    sys.exit()
 
-                # sum_count: int = 0
-                # hash_sizes: dict = {}
-                # for size in item.get('sizes'):
-                #     size_count: int = 0
-                #     for stock in size.get('stocks'):
-                #         item_count: int = stock.get('qty')
-                #         if item_count:
-                #             size_count += item_count
-                #     hash_sizes[size.get('name')] = size_count
-                #     sum_count += size_count
+                card_object['brands'] = {
+                    'id': item.get('brandId'),
+                    'name': item.get('brand')
+                }
 
-                #     size_object = SizeSchema(**size)
-                #     size_objects.append(size_object.dict())
+                card_object['items'] = {
+                    'id': item.get('root'),
+                    'category': category_id,
+                    'brand': item.get('brandId')
+                }
 
-                # item['category'] = category_id
-                # item['item'] = item.get('id')
-                # item['timestamp'] = time.time()
-                # item['sum_count'] = sum_count
+                card_object['articles'] = {
+                    'id': item.get('id'),
+                    'item': item.get('root'),
+                    'name': item.get('name')
+                }
 
-                # try:
-                #     item_object = ItemSchema(**item)
-                #     brand_object = BrandSchema(**item)
-                #     item_history_object = ItemsHistorySchema(**item)
-                #     # history_size_object = HistorySizeRelationSchema()
+                card_object['articles_history'] = {
+                    'article': item.get('id'),
+                    'timestamp': self.timestamp,
+                    'price_full': item.get('priceU'),
+                    'price_with_discount': item.get('salePriceU'),
+                    'sale': item.get('sale'),
+                    'rating': item.get('rating'),
+                    'feedbacks': item.get('feedbacks'),
+                }
 
-                #     item_objects.append(item_object.dict())
-                #     brand_objects.append(brand_object.dict())
-                #     item_history_objects.append(item_history_object.dict())
-                # except pydantic.ValidationError:
-                #     logger.info('validation error')
-                #     pass
+                colors: list[dict] = article_data.get('colors')
+                for color in colors:
+                    color_object = ColorSchema(**color)
+                    card_object['colors'].append(color_object.dict())
+                    card_object['articles'].update(
+                        {'color': 999999} if len(colors) > 1 else
+                        {'color': color.get('id')})
 
-            self.queue3.task_done()
+                sum_count: int = 0
+                hash_sizes: dict = {}
+                for size in item.get('sizes'):
+                    size_count: int = 0
+                    size_name: str = size.get('name')
+                    for stock in size.get('stocks'):
+                        item_count: int = stock.get('qty')
+                        if item_count:
+                            size_count += item_count
+                    hash_sizes[size_name] = size_count
+                    sum_count += size_count
+
+                    card_object['sizes'].append({
+                        'name': size_name,
+                        'count': size_count
+                    })
+
+                card_object['articles_history'].update(
+                    {'sum_count': sum_count})
+
+                await self.db_queue.put(card_object)
+
+            self.cards_queue.task_done()
 
             finish: float = time.time()
             impl_time: float = finish - start
             logger.info('collected data for %d: %s items in %d seconds',
-                        category_id, len(item_objects), impl_time)
+                        category_id, len(card_object), impl_time)
 
-            # global items_count
-            # items_count += len(item_objects)
+    async def write_to_db(self, cancel_write_to_db: Event) -> None:
+        while True:
+            card = await self.db_queue.get()
 
-            if self.queue3.empty():
-                cancel_collect_data.set()
+            # your code here
 
-            # from pprint import pprint
-            # print('======= ITEM =======')
-            # pprint(item_objects[0])
-            # print('======= SIZE =======')
-            # pprint(size_objects[0])
-            # print('======= BRAND =======')
-            # pprint(brand_objects[0])
-            # print('======= ITEM_HISTORY =======')
-            # pprint(item_history_objects[0])
-            # print('======= COLOR =======')
-            # pprint(color_objects[1])
+            self.db_queue.task_done()
+
+            if self.db_queue.empty():
+                cancel_write_to_db.set()
 
 
-async def parsing_manager(categories: CategoriesStack) -> None:
+async def parsing_manager(categories: list[dict]) -> None:
 
     parser = ItemsParser()
-    semaphore = asyncio.Semaphore(SEMAPHORE_LIMIT)
+    semaphore = Semaphore(SEMAPHORE_LIMIT)
 
     get_items_ids_tasks: list[Task] = [
         create_task(parser.get_items_ids(
-            category, semaphore)) for category in categories
+            category, semaphore)) for category in categories[:100]
     ]
 
-    cancel_collect_data = asyncio.Event()
+    cancel_write_to_db = Event()
 
     get_cards_task = create_task(parser.get_cards())
-    collect_data_task = create_task(parser.collect_data(cancel_collect_data))
+    collect_data_task = create_task(parser.collect_data())
+    write_to_db_task = create_task(parser.write_to_db(cancel_write_to_db))
 
     await asyncio.gather(*get_items_ids_tasks)
 
-    await cancel_collect_data.wait()
+    await cancel_write_to_db.wait()
 
     get_cards_task.cancel()
     collect_data_task.cancel()
+    write_to_db_task.cancel()
 
 
 def load_all_items() -> None:
@@ -386,19 +379,17 @@ def load_all_items() -> None:
     engine = create_engine(POSTGRES_URL)
 
     with Session(engine) as session:
-        selectable: Select = select(Category).where(Category.id.in_([61310]))
-        # selectable: Select = select(Category)
-        categories = CategoriesStack()
+        # selectable: Select = select(Category).where(Category.id.in_([130268]))
+        selectable: Select = select(Category)
+        categories: list[dict] = []
         for category in session.scalars(selectable):
-            categories.put(category.__dict__)
+            category_as_dict = category.__dict__
+            shard: str = category_as_dict.get('shard')
+            if shard and 'blackhole' not in shard and 'preset' not in shard:
+                categories.append(category_as_dict)
 
     asyncio.run(parsing_manager(categories))
 
     finish: float = time.time()
     impl_time: float = finish - start
-    logger.info('got %d items in %d seconds', items_count, impl_time)
-
-# 129265, 8149, 63010
-
-# 61439 религиозная женская
-# 9061 платья
+    logger.info('done in %d seconds', impl_time)
