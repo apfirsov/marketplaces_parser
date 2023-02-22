@@ -1,4 +1,4 @@
-from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Integer,
+from sqlalchemy import (Boolean, Column, DateTime, ForeignKey, Integer,
                         String)
 from sqlalchemy.orm import declarative_base, relationship
 
@@ -36,9 +36,7 @@ class Item(Base):
 
     id = Column(Integer, primary_key=True)
     category = Column(Integer, ForeignKey("categories.id"))
-    name = Column(String)
     brand = Column(Integer, ForeignKey("brands.id"))
-    color = Column(Integer, ForeignKey("colors.id"))
 
 
 class Size(Base):
@@ -49,23 +47,32 @@ class Size(Base):
 
 
 class HistorySizeRelation(Base):
-    __tablename__ = "history_size_relations"
+    __tablename__ = "history_size_relation"
 
-    history = Column(ForeignKey("items_history.id"), primary_key=True)
+    history = Column(ForeignKey("articles_history.id"), primary_key=True)
     size = Column(ForeignKey("sizes.id"), primary_key=True)
     count = Column(Integer)
 
 
-class ItemsHistory(Base):
-    __tablename__ = "items_history"
+class Article(Base):
+    __tablename__ = "articles"
 
     id = Column(Integer, primary_key=True)
     item = Column(Integer, ForeignKey("items.id"))
+    name = Column(String)
+    color = Column(Integer, ForeignKey('colors.id'))
+
+
+class ArticlesHistory(Base):
+    __tablename__ = "articles_history"
+
+    id = Column(Integer, primary_key=True)
+    article = Column(Integer, ForeignKey("articles.id"))
     timestamp = Column(DateTime)
-    sale = Column(Integer)
     price_full = Column(Integer)
     price_with_discount = Column(Integer)
+    sale = Column(Integer)
     rating = Column(Integer)
     feedbacks = Column(Integer)
-    sizes = relationship("HistorySizeRelation")
     sum_count = Column(Integer)
+    sizes = relationship("HistorySizeRelation")

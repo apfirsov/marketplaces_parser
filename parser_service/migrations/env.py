@@ -20,7 +20,7 @@ if config.config_file_name is not None:
 
 # this will overwrite the ini-file sqlalchemy.url path
 # with the path given in the config of the main code
-config.set_main_option('sqlalchemy.url', os.environ.get("DATABASE_URL"))
+config.set_main_option('sqlalchemy.url', os.environ.get("POSTGRES_URL"))
 
 # add your model's MetaData object here
 # for 'autogenerate' support
