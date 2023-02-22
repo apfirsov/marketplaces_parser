@@ -20,6 +20,8 @@
 
 ```
 alembic init migrations
+
+alembic init -t async <script_directory_here> 
 ```
 
  - После этого будет создана папка с миграциями и конфигурационный файл для алембика.

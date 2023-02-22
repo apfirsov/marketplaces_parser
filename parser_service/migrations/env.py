@@ -3,9 +3,9 @@ from logging.config import fileConfig
 
 from alembic import context
 from dotenv import load_dotenv
-from sqlalchemy import engine_from_config, pool
 
 from db.models import Base
+from db.session import engine
 
 load_dotenv()
 
@@ -59,29 +59,27 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
+async def run_migrations_online():
     """Run migrations in 'online' mode.
 
     In this scenario we need to create an Engine
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
-
-    with connectable.connect() as connection:
+    def do_migrations(connection):
         context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+            connection=connection,
+            target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()
+
+    async with engine.connect() as connection:
+        await connection.run_sync(do_migrations)
 
 
 if context.is_offline_mode():
     run_migrations_offline()
 else:
-    run_migrations_online()
+    import asyncio
+    asyncio.run(run_migrations_online())
