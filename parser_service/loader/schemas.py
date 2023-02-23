@@ -49,9 +49,9 @@ class ArticleSchema(BaseModel):
     brandId: str
     brand: str
     name: str
-    sale: int
-    priceU: int
-    salePriceU: int
+    sale: Optional[int]
+    priceU: Optional[int]
+    salePriceU: Optional[int]
     rating: int
     feedbacks: int
     colors: list[dict]
