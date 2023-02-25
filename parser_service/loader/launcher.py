@@ -1,5 +1,6 @@
 from logger_config import parser_logger as logger
 
+import asyncio
 from .categories import load_all_categories
 from .items import load_all_items
 
@@ -21,7 +22,7 @@ def main(argv=None):
         logger.info(
             f"start launcher with param: {func_name[0]} {func_name[1]}"
         )
-        LAUNCH_OPTIONS[func_name[0]][func_name[1]]()
+        asyncio.run(LAUNCH_OPTIONS[func_name[0]][func_name[1]]())
     except Exception as error:
         logger.exception(f"launcher failed: {error}")
 
