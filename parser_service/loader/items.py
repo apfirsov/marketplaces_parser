@@ -46,18 +46,19 @@ class ItemsParser:
 
     async def parsing_manager(self) -> None:
 
+        create_task(self.get_cards())
+        create_task(self.collect_data())
+        create_task(self.write_to_db())
+
         tasks_list: list[Task] = [
             create_task(self.get_items_ids())
             for _ in range(self.categories_queue.qsize())
         ]
 
-        tasks_list.append(create_task(self.get_cards()))
-        tasks_list.append(create_task(self.collect_data()))
-        tasks_list.append(create_task(self.write_to_db()))
         # tasks_list.append(create_task(self.waiter()))
         waiter_task = create_task(self.waiter())
 
-        await asyncio.gather(*tasks_list)
+        # await asyncio.gather(*tasks_list)
 
         await waiter_task
 
@@ -294,7 +295,7 @@ class ItemsParser:
                     if not len(response_data):
                         logger.info('category %d, cnt %d !!1!!', category_id, cnt)
                         # print('ksdjflsjdf', concatenated_ids)
-                        await self.ids_queue.put(
+                        self.ids_queue.put_nowait(
                             (category_id, concatenated_ids))
                         if self.categories_queue.empty():
                             self.complete.set()
@@ -310,7 +311,7 @@ class ItemsParser:
                             cnt += 1
                         else:
                             logger.info('category %d, cnt %d !!2!!', category_id, cnt)
-                            await self.ids_queue.put(
+                            self.ids_queue.put_nowait(
                                 (category_id, concatenated_ids))
                             if self.categories_queue.empty():
                                 self.complete.set()
