@@ -46,19 +46,19 @@ class ItemsParser:
 
     async def parsing_manager(self) -> None:
 
-        create_task(self.get_cards())
-        create_task(self.collect_data())
-        create_task(self.write_to_db())
-
         tasks_list: list[Task] = [
             create_task(self.get_items_ids())
             for _ in range(self.categories_queue.qsize())
         ]
 
+        await asyncio.gather(*tasks_list)
+
+        create_task(self.get_cards())
+        create_task(self.collect_data())
+        create_task(self.write_to_db())
+
         # tasks_list.append(create_task(self.waiter()))
         waiter_task = create_task(self.waiter())
-
-        # await asyncio.gather(*tasks_list)
 
         await waiter_task
 
@@ -74,7 +74,7 @@ class ItemsParser:
                 print('очереди пустые')
                 break
             else:
-                from pprint import pprint
+                self.complete.clear()
                 print(self.categories_queue.qsize())
                 print(self.ids_queue.qsize())
                 print(self.cards_queue.qsize())
@@ -85,7 +85,6 @@ class ItemsParser:
         async with self.semaphore:
 
             category = await self.categories_queue.get()
-            self.complete.clear()
 
             start: float = time.time()
             category_id: int = category.get('id')
@@ -297,8 +296,8 @@ class ItemsParser:
                         # print('ksdjflsjdf', concatenated_ids)
                         self.ids_queue.put_nowait(
                             (category_id, concatenated_ids))
-                        if self.categories_queue.empty():
-                            self.complete.set()
+                        # if self.categories_queue.empty():
+                            # self.complete.set()
                         # if self.categories_queue.empty():
                         #     self._categories_empty = True
                         break
@@ -313,8 +312,8 @@ class ItemsParser:
                             logger.info('category %d, cnt %d !!2!!', category_id, cnt)
                             self.ids_queue.put_nowait(
                                 (category_id, concatenated_ids))
-                            if self.categories_queue.empty():
-                                self.complete.set()
+                            # if self.categories_queue.empty():
+                            #     self.complete.set()
                             # if self.categories_queue.empty():
                             #     self._categories_empty = True
                             concatenated_ids = str(item_id)
@@ -333,10 +332,11 @@ class ItemsParser:
 
     async def get_cards(self) -> None:
         while True:
+            if self.categories_queue.empty():
+                self.complete.set()
             category_id: int
             concatenated_ids: str
             category_id, concatenated_ids = await self.ids_queue.get()
-            self.complete.clear()
 
             base_url: str = (f'https://card.wb.ru/cards/detail?'
                              f'spp=30{QUERY_PARAMS}&nm=')
@@ -359,10 +359,11 @@ class ItemsParser:
 
     async def collect_data(self) -> None:
         while True:
+            if self.ids_queue.empty():
+                self.complete.set()
             category_id: int
             cards: list[dict]
             category_id, cards = await self.cards_queue.get()
-            self.complete.clear()
 
             for item in cards:
 
@@ -434,23 +435,23 @@ class ItemsParser:
                     {'sum_count': sum_count})
 
                 await self.db_queue.put(card_object)
-                if self.cards_queue.empty():
-                    self.complete.set()
 
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
     async def write_to_db(self) -> None:
         while True:
+            if self.cards_queue.empty():
+                self.complete.set()
             card = await self.db_queue.get()
-            self.complete.clear()
 
             global items_count
             items_count += 1
 
             # your code here
-            if self.db_queue.empty():
-                self.complete.set()
+
+            # if self.db_queue.empty():
+            #     self.complete.set()
 
 
 async def load_all_items() -> None:
