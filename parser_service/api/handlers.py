@@ -5,10 +5,6 @@ from db.dals import CategoryDAL
 from db.models import Category
 from db.session import get_db
 
-#########################
-# BLOCK WITH API ROUTES #
-#########################
-
 parser_router = APIRouter()
 
 

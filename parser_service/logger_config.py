@@ -1,7 +1,9 @@
 import logging
 from logging.config import dictConfig
 
+
 DEFAULT_LEVEL = "INFO"
+
 
 logging_schema = {
     "version": 1,

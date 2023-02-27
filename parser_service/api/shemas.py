@@ -1,9 +1,5 @@
 from pydantic import BaseModel
 
-#########################
-# BLOCK WITH API MODELS #
-#########################
-
 
 class TunedModel(BaseModel):
     class Config:
@@ -15,8 +11,8 @@ class TunedModel(BaseModel):
 class ShowCategory(TunedModel):
     id: int
     name: str
-    parent_id: int
+    parent: int
+    url: str
     shard: str
     query: str
-    url: str
     children: bool

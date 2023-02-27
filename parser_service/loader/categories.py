@@ -1,25 +1,18 @@
 import sys
+from http import HTTPStatus
 from typing import Optional
 
 import requests
-from http import HTTPStatus
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Category
-from settings import POSTGRES_URL
+from db.session import get_db
+from logger_config import parser_logger as logger
 
 from .constants import MAIN_MENU
 from .exceptions import EmptyResponseError, ResponseStatusCodeError
-from logger_config import parser_logger as logger
-from .schemas import CategorySchema
-
-engine = create_engine(
-    POSTGRES_URL,
-    future=True,
-    echo=True,
-    execution_options={'isolation_level': 'AUTOCOMMIT'},
-)
+from .schemas import SourceCategory
 
 
 def _handle_response(response: list[dict]) -> list[dict]:
@@ -36,7 +29,10 @@ def _handle_response(response: list[dict]) -> list[dict]:
     return result
 
 
-def load_all_categories() -> None:
+async def load_all_categories() -> None:
+    db = get_db()
+    session: AsyncSession = await anext(db)
+
     catalogue_url: str = MAIN_MENU
     try:
         response = requests.get(catalogue_url)
@@ -51,14 +47,13 @@ def load_all_categories() -> None:
 
         objects: list[dict] = _handle_response(response_json)
 
+        inst_lst = [Category(**dct) for dct in objects]
+
     except Exception as error:
         logger.exception(error)
         sys.exit()
 
-    with Session(engine) as s:
-        s.query(Category).delete()
-        s.bulk_insert_mappings(
-            Category,
-            objects
-        )
-        s.commit()
+    async with session.begin():
+        await session.execute(delete(Category))
+        session.add_all(inst_lst)
+        await session.commit()
