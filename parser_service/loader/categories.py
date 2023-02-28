@@ -10,9 +10,9 @@ from db.models import Category
 from db.session import get_db
 from logger_config import parser_logger as logger
 
-from .constants import MAIN_MENU
-from .exceptions import EmptyResponseError, ResponseStatusCodeError
-from .schemas import SourceCategory
+from constants import MAIN_MENU
+from exceptions import EmptyResponseError, ResponseStatusCodeError
+from schemas import CategorySchema
 
 
 def _handle_response(response: list[dict]) -> list[dict]:

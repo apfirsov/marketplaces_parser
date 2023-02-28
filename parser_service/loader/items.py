@@ -13,11 +13,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Select
 
-from .constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
+from constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
                         MAX_BRANDS_IN_REQUEST, MAX_ITEMS_IN_BRANDS_FILTER,
                         MAX_ITEMS_IN_REQUEST, MAX_PAGE, MIN_PRICE_RANGE,
                         QUERY_PARAMS, SEMAPHORE_LIMIT)
-from .schemas import ArticleSchema, ColorSchema
+from schemas import ArticleSchema, ColorSchema
 
 items_count: int = 0
 
@@ -40,7 +40,7 @@ class ItemsParser:
             category_as_dict = category.__dict__
             shard: str = category_as_dict.get('shard')
             if shard and 'blackhole' not in shard and 'preset' not in shard:
-                await self.categories_queue.put(category_as_dict)
+                self.categories_queue.put_nowait(category_as_dict)
 
         await self.parsing_manager()
 
@@ -75,10 +75,6 @@ class ItemsParser:
                 break
             else:
                 self.complete.clear()
-                print(self.categories_queue.qsize())
-                print(self.ids_queue.qsize())
-                print(self.cards_queue.qsize())
-                print(self.db_queue.qsize())
 
     async def get_items_ids(self) -> None:
 
@@ -97,7 +93,7 @@ class ItemsParser:
             while attempts_counter:
                 try:
                     async with aiohttp.ClientSession() as session:
-                        async with session.get(price_filter_url) as r:
+                        async with session.get(price_filter_url, ssl=False) as r:
                             response: dict = await r.json(content_type=None)
 
                     ctg_filters: list[dict] = (
@@ -145,7 +141,7 @@ class ItemsParser:
         while attempts_counter:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(last_page_url) as r:
+                    async with session.get(last_page_url, ssl=False) as r:
                         response: dict = await r.json(content_type=None)
 
                 response_data: list[dict] = (
@@ -196,7 +192,7 @@ class ItemsParser:
         while attempts_counter:
             try:
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(brand_filter_url) as r:
+                    async with session.get(brand_filter_url, ssl=False) as r:
                         response: dict = await r.json(content_type=None)
 
                 brand_filters: list[dict] = (
@@ -260,46 +256,18 @@ class ItemsParser:
             while page <= MAX_PAGE:
                 url: str = base_url + '&page=' + str(page)
                 try:
-                    async with session.get(url) as response:
+                    async with session.get(url, ssl=False) as response:
                         response: dict = await response.json(content_type=None)
 
                     response_data: list[dict] = (
                         response.get('data').get('products'))
 
-                    # новая реализация VVV
-                    # if len(response_data):
-                    #     for item in response_data:
-                    #         item_id: int = item.get('id')
-
-                    #         if cnt < MAX_ITEMS_IN_REQUEST:
-                    #             concatenated_ids = ';'.join(
-                    #                 [concatenated_ids, str(item_id)])
-                    #             cnt += 1
-                    #         else:
-                    #             concatenated_ids = str(item_id)
-                    #             cnt = 0
-
-                    # await self.ids_queue.put(
-                    #     (category_id, concatenated_ids[1:]))
-                    # concatenated_ids: str = ''  # багфикс в новой реализации!!
-
-                    # if self.categories_queue.empty():
-                    #     self._categories_empty = True
-
-                    # if not len(response_data):
-                    #     break
-                    # новая реализация ^^^
-
-                    # старая реализация VVV
                     if not len(response_data):
                         logger.info('category %d, cnt %d !!1!!', category_id, cnt)
-                        # print('ksdjflsjdf', concatenated_ids)
                         self.ids_queue.put_nowait(
                             (category_id, concatenated_ids))
                         # if self.categories_queue.empty():
                             # self.complete.set()
-                        # if self.categories_queue.empty():
-                        #     self._categories_empty = True
                         break
 
                     for item in response_data:
@@ -314,11 +282,8 @@ class ItemsParser:
                                 (category_id, concatenated_ids))
                             # if self.categories_queue.empty():
                             #     self.complete.set()
-                            # if self.categories_queue.empty():
-                            #     self._categories_empty = True
                             concatenated_ids = str(item_id)
                             cnt = 1
-                    # старая реализация ^^^
 
                     attempts_counter = 0
                     page += 1
@@ -332,7 +297,7 @@ class ItemsParser:
 
     async def get_cards(self) -> None:
         while True:
-            if self.categories_queue.empty():
+            if self.categories_queue.empty() and self.ids_queue.empty():
                 self.complete.set()
             category_id: int
             concatenated_ids: str
@@ -344,7 +309,7 @@ class ItemsParser:
             async with aiohttp.ClientSession() as session:
                 url: str = base_url + concatenated_ids
 
-                async with session.get(url) as response:
+                async with session.get(url, ssl=False) as response:
                     response: dict = await response.json(content_type=None)
                     response_data: list[dict] = (
                         response.get('data').get('products'))
@@ -352,19 +317,18 @@ class ItemsParser:
             logger.info('category %d, len_response_data %d -- get_cards',
                         category_id, len(response_data))
 
-            await self.cards_queue.put((category_id, response_data))
-            if self.ids_queue.empty():
-                self.complete.set()
+            self.cards_queue.put_nowait((category_id, response_data))
+
             logger.info(f'got cards chunk for {category_id}')
 
     async def collect_data(self) -> None:
         while True:
-            if self.ids_queue.empty():
+            if self.ids_queue.empty() and self.cards_queue.empty():
                 self.complete.set()
             category_id: int
             cards: list[dict]
             category_id, cards = await self.cards_queue.get()
-
+            a = 1
             for item in cards:
 
                 card_object: dict = {
@@ -434,14 +398,14 @@ class ItemsParser:
                 card_object['articles_history'].update(
                     {'sum_count': sum_count})
 
-                await self.db_queue.put(card_object)
+                self.db_queue.put_nowait(card_object)
 
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
     async def write_to_db(self) -> None:
         while True:
-            if self.cards_queue.empty():
+            if self.cards_queue.empty() and self.db_queue.empty():
                 self.complete.set()
             card = await self.db_queue.get()
 
@@ -449,9 +413,6 @@ class ItemsParser:
             items_count += 1
 
             # your code here
-
-            # if self.db_queue.empty():
-            #     self.complete.set()
 
 
 async def load_all_items() -> None:
