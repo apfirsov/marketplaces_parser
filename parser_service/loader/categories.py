@@ -10,9 +10,9 @@ from db.models import Category
 from db.session import get_db
 from logger_config import parser_logger as logger
 
-from .constants import MAIN_MENU
-from .exceptions import EmptyResponseError, ResponseStatusCodeError
-from .schemas import SourceCategory
+from constants import MAIN_MENU
+from exceptions import EmptyResponseError, ResponseStatusCodeError
+from schemas import CategorySchema
 
 
 def _handle_response(response: list[dict]) -> list[dict]:
@@ -22,7 +22,7 @@ def _handle_response(response: list[dict]) -> list[dict]:
         landing: Optional[list[dict]] = item.get('landing')
         parent: Optional[list[dict]] = item.get('parent')
         if landing or parent:
-            section = SourceCategory(**item)
+            section = CategorySchema(**item)
             result.append(section.dict())
             if childs:
                 result.extend(_handle_response(childs))

@@ -4,7 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, root_validator, validator
 
 
-class SourceCategory(BaseModel):
+class CategorySchema(BaseModel):
     id: int
     name: str
     parent: Optional[int]
@@ -41,3 +41,23 @@ class SourceCategory(BaseModel):
         if v is not None and ' ' in v:
             raise ValueError('this field must not contain spaces')
         return v
+
+
+class ArticleSchema(BaseModel):
+    id: int
+    root: int
+    brandId: str
+    brand: str
+    name: str
+    sale: Optional[int]
+    priceU: Optional[int]
+    salePriceU: Optional[int]
+    rating: int
+    feedbacks: int
+    colors: list[dict]
+    sizes: list[dict]
+
+
+class ColorSchema(BaseModel):
+    id: int
+    name: str
