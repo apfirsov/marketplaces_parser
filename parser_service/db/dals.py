@@ -5,10 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Category
 
-###########################################################
-# BLOCK FOR INTERACTION WITH DATABASE IN BUSINESS CONTEXT #
-###########################################################
-
 
 class CategoryDAL:
     """Data Access Layer for operating parser info"""

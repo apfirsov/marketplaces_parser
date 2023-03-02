@@ -2,10 +2,10 @@ import asyncio
 import json
 import sys
 import time
-from asyncio import Event, Queue, Semaphore, Task, create_task
+from asyncio import Queue, Semaphore, Task, create_task
 
-import aiohttp
 import pydantic
+from aiohttp import ClientSession
 from db.models import Category
 from db.session import get_db
 from logger_config import parser_logger as logger
@@ -13,118 +13,122 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Select
 
-from .constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
+from constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
                         MAX_BRANDS_IN_REQUEST, MAX_ITEMS_IN_BRANDS_FILTER,
                         MAX_ITEMS_IN_REQUEST, MAX_PAGE, MIN_PRICE_RANGE,
-                        QUERY_PARAMS, SEMAPHORE_LIMIT)
-from .schemas import ArticleSchema, ColorSchema
+                        QUERY_PARAMS, REQUEST_LIMIT, WORKER_COUNT)
+from schemas import ArticleSchema, ColorSchema
 
 items_count: int = 0
+
+# TODO: Синхронные логи (асинк или сократить количество логирования)
+# TODO: Проверить алгоритмы фильтрации
+# TODO: Замеры в декораторе
+# TODO: Код стайл
+# TODO: Добавить БД
+# TODO: Найти/сократить синхронные вставки
+# TODO: После выполнения пунктов выше замеры, подбор параметров
 
 
 class ItemsParser:
 
-    def __init__(self) -> None:
-        self.timestamp: float = time.time()
-        self.semaphore = Semaphore(SEMAPHORE_LIMIT)
-        # self._categories_empty = False
-        self.complete = Event()
-
-        self.categories_queue: Queue = Queue()
-        self.ids_queue: Queue = Queue()
-        self.cards_queue: Queue = Queue()
-        self.db_queue: Queue = Queue()
+    def __init__(self, client_session: ClientSession) -> None:
+        self._session: ClientSession = client_session
+        self._timestamp: float = time.time()
+        self._request_semaphore = Semaphore(REQUEST_LIMIT)
+        self._categories_queue: Queue = Queue()
+        self._ids_queue: Queue = Queue()
+        self._cards_queue: Queue = Queue()
+        self._db_queue: Queue = Queue()
+        self._queues = (
+            self._categories_queue,
+            self._ids_queue,
+            self._cards_queue,
+            self._db_queue,
+        )
+        self._req_counter = 0
 
     async def start(self, categories):
         for category in categories.scalars():
             category_as_dict = category.__dict__
             shard: str = category_as_dict.get('shard')
             if shard and 'blackhole' not in shard and 'preset' not in shard:
-                await self.categories_queue.put(category_as_dict)
+                self._categories_queue.put_nowait(category_as_dict)
 
-        await self.parsing_manager()
+        for _ in range(WORKER_COUNT):
+            create_task(self._get_cards())
+            create_task(self._collect_data())
+            create_task(self._write_to_db())
+            create_task(self._get_items_ids())
 
-    async def parsing_manager(self) -> None:
+        await create_task(self._waiter())
 
-        tasks_list: list[Task] = [
-            create_task(self.get_items_ids())
-            for _ in range(self.categories_queue.qsize())
-        ]
+    async def _waiter(self) -> None:
 
-        await asyncio.gather(*tasks_list)
-
-        create_task(self.get_cards())
-        create_task(self.collect_data())
-        create_task(self.write_to_db())
-
-        # tasks_list.append(create_task(self.waiter()))
-        waiter_task = create_task(self.waiter())
-
-        await waiter_task
-
-    async def waiter(self):
         while True:
-            print('начинаем ждать')
-            await self.complete.wait()
-            print('дождались')
-            if (self.categories_queue.empty()
-                and self.ids_queue.empty()
-                and self.cards_queue.empty()
-                    and self.db_queue.empty()):
-                print('очереди пустые')
+            for queue in self._queues:
+                await queue.join()
+
+            if all([queue.empty() for queue in self._queues]):
                 break
-            else:
-                self.complete.clear()
-                print(self.categories_queue.qsize())
-                print(self.ids_queue.qsize())
-                print(self.cards_queue.qsize())
-                print(self.db_queue.qsize())
 
-    async def get_items_ids(self) -> None:
+    async def _get_data(self, url: str) -> dict:
 
-        async with self.semaphore:
-
-            category = await self.categories_queue.get()
-
-            start: float = time.time()
-            category_id: int = category.get('id')
-            shard: str = category.get('shard')
-            query: str = category.get('query')
-            price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
-                                     f'filters?{query}{QUERY_PARAMS}')
-
+        async with self._request_semaphore:
             attempts_counter: int = ATTEMPTS_COUNTER
+
             while attempts_counter:
                 try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(price_filter_url) as r:
-                            response: dict = await r.json(content_type=None)
+                    async with self._session.get(url, ssl=False) as response:
+                        if response.ok:
+                            self._req_counter += 1
+                            return await response.json(content_type=None)
 
-                    ctg_filters: list[dict] = (
-                        response.get('data').get('filters'))
-                    for ctg_filter in ctg_filters:
-                        if ctg_filter.get('key') == 'priceU':
-                            ctg_max_price: int = ctg_filter.get('maxPriceU')  # !!!!!!
-                            break
-                    break
+                        logger.info('Bad response status %d at: %s',
+                                    response.status, url)
 
-                except (json.decoder.JSONDecodeError, AttributeError) as error:
-                    attempts_counter -= 1
-                    if not attempts_counter:
-                        logger.critical(error)
-                        sys.exit()
-                    logger.info(
-                        'request error occured at: %s, %d tries left',
-                        price_filter_url, attempts_counter
-                    )
+                # except (json.decoder.JSONDecodeError, AttributeError) as err:
+                except Exception as err:
+                    logger.info('request error occured at: %s, %s', url, err)
 
-            await self._basic_parsing(
-                category_id, shard, query, 0, ctg_max_price)
+                logger.info('request at: %s, %d tries left',
+                            url, attempts_counter)
+                attempts_counter -= 1
+                await asyncio.sleep(ATTEMPTS_COUNTER-attempts_counter)
+                if not attempts_counter:
+                    logger.critical('attempts_counter lost at: %s', url)
+                    sys.exit()
 
-            finish: float = time.time()
-            impl_time: float = round(finish - start, 2)
-            logger.info('parsed %s %s in %d seconds',
-                        shard, query, impl_time)
+
+    async def _get_items_ids(self) -> None:
+
+        category = await self._categories_queue.get()
+
+        start: float = time.time()
+        category_id: int = category.get('id')
+        shard: str = category.get('shard')
+        query: str = category.get('query')
+        price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
+                                 f'filters?{query}{QUERY_PARAMS}')
+
+        response = await self._get_data(price_filter_url)
+
+        ctg_filters: list[dict] = (
+            response.get('data').get('filters'))
+        for ctg_filter in ctg_filters:
+            if ctg_filter.get('key') == 'priceU':
+                ctg_max_price: int = ctg_filter.get('maxPriceU')  # !!!!!!
+                break
+
+        await self._basic_parsing(
+            category_id, shard, query, 0, ctg_max_price)
+
+        self._categories_queue.task_done()
+
+        finish: float = time.time()
+        impl_time: float = round(finish - start, 2)
+        logger.info('parsed %s %s in %d seconds',
+                    shard, query, impl_time)
 
     async def _basic_parsing(self, category_id: int,
                              shard: str,
@@ -140,28 +144,13 @@ class ItemsParser:
                          f'{QUERY_PARAMS}&{query}{price_lmt}')
 
         last_page_url: str = base_url + '&page=' + str(MAX_PAGE)
-        attempts_counter: int = ATTEMPTS_COUNTER
 
-        while attempts_counter:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(last_page_url) as r:
-                        response: dict = await r.json(content_type=None)
+        response = await self._get_data(last_page_url)
+        response_data: list[dict] = (
+            response.get('data').get('products'))
 
-                response_data: list[dict] = (
-                    response.get('data').get('products'))
-
-                last_page_is_full: bool = (
-                    len(response_data) > LAST_PAGE_TRESHOLD)
-                break
-
-            except (json.decoder.JSONDecodeError, AttributeError) as error:
-                attempts_counter -= 1
-                if not attempts_counter:
-                    logger.critical(error)
-                    sys.exit()
-                logger.info('request error at: %s, %d tries left',
-                            last_page_url, attempts_counter)
+        last_page_is_full: bool = (
+            len(response_data) > LAST_PAGE_TRESHOLD)
 
         if last_page_is_full:
             rnd_avg: int = round((max_pr + min_pr) // 2 + 100, -4)
@@ -191,25 +180,9 @@ class ItemsParser:
         brand_filter_url: str = (f'{BASE_URL}{shard}/v4/filters?filters='
                                  f'fbrand&{query}{QUERY_PARAMS}{price_lmt}')
 
-        attempts_counter: int = ATTEMPTS_COUNTER
-
-        while attempts_counter:
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(brand_filter_url) as r:
-                        response: dict = await r.json(content_type=None)
-
-                brand_filters: list[dict] = (
-                    response.get('data').get('filters')[0].get('items'))
-
-            except (json.decoder.JSONDecodeError,
-                    AttributeError, TypeError) as error:
-                attempts_counter -= 1
-                if not attempts_counter:
-                    logger.critical(error)
-                    sys.exit()
-                logger.info('request error at: %s, %d tries left',
-                            brand_filter_url, attempts_counter)
+        response = await self._get_data(brand_filter_url)
+        brand_filters: list[dict] = (
+            response.get('data').get('filters')[0].get('items'))
 
         concatenated_ids_list: list[str] = []
         concatenated_ids: str = ''
@@ -227,8 +200,9 @@ class ItemsParser:
                 concatenated_ids_list.append(concatenated_ids[1:])
                 concatenated_ids = str(brand_id)
                 cnt = 1
-
-        concatenated_ids_list.append(concatenated_ids[1:])
+        # кажется, это тут не нужно
+        # TODO: Разобраться
+        # concatenated_ids_list.append(concatenated_ids[1:])
 
         number_of_requests: int = len(concatenated_ids_list)
 
@@ -244,127 +218,70 @@ class ItemsParser:
         logger.info('parsing by brand for section %s, price range %s '
                     'done in %d seconds', category_id, price_lmt, impl_time)
 
-    async def _get_items_ids_chunk(self,
-                                   category_id: int,
-                                   base_url: str) -> None:
+    async def _get_items_ids_chunk(
+            self, category_id: int, base_url: str) -> None:
 
         logger.info('getting items ids chunks')
 
-        async with aiohttp.ClientSession() as session:
+        page: int = 1
+        concatenated_ids: str = ''
+        cnt: int = 0
 
-            page: int = 1
-            attempts_counter: int = ATTEMPTS_COUNTER
-            concatenated_ids: str = ''
-            cnt: int = 0
+        while page <= MAX_PAGE:
+            url: str = base_url + '&page=' + str(page)
 
-            while page <= MAX_PAGE:
-                url: str = base_url + '&page=' + str(page)
-                try:
-                    async with session.get(url) as response:
-                        response: dict = await response.json(content_type=None)
+            response = await self._get_data(url)
+            response_data: list[dict] = response.get('data').get('products')
 
-                    response_data: list[dict] = (
-                        response.get('data').get('products'))
+            if not len(response_data):
+                # logger.info('category %d, cnt %d !!1!!', category_id, cnt)
+                self._ids_queue.put_nowait((category_id, concatenated_ids))
+                break
 
-                    # новая реализация VVV
-                    # if len(response_data):
-                    #     for item in response_data:
-                    #         item_id: int = item.get('id')
+            for item in response_data:
+                item_id: int = item.get('id')
+                if cnt < MAX_ITEMS_IN_REQUEST:
+                    concatenated_ids += (';', '')[len(
+                        concatenated_ids) == 0] + str(item_id)
+                    cnt += 1
+                else:
+                    # logger.info('category %d, cnt %d !!2!!', category_id, cnt)
+                    self._ids_queue.put_nowait(
+                        (category_id, concatenated_ids))
+                    concatenated_ids = str(item_id)
+                    cnt = 1
+            page += 1
 
-                    #         if cnt < MAX_ITEMS_IN_REQUEST:
-                    #             concatenated_ids = ';'.join(
-                    #                 [concatenated_ids, str(item_id)])
-                    #             cnt += 1
-                    #         else:
-                    #             concatenated_ids = str(item_id)
-                    #             cnt = 0
-
-                    # await self.ids_queue.put(
-                    #     (category_id, concatenated_ids[1:]))
-                    # concatenated_ids: str = ''  # багфикс в новой реализации!!
-
-                    # if self.categories_queue.empty():
-                    #     self._categories_empty = True
-
-                    # if not len(response_data):
-                    #     break
-                    # новая реализация ^^^
-
-                    # старая реализация VVV
-                    if not len(response_data):
-                        logger.info('category %d, cnt %d !!1!!', category_id, cnt)
-                        # print('ksdjflsjdf', concatenated_ids)
-                        self.ids_queue.put_nowait(
-                            (category_id, concatenated_ids))
-                        # if self.categories_queue.empty():
-                            # self.complete.set()
-                        # if self.categories_queue.empty():
-                        #     self._categories_empty = True
-                        break
-
-                    for item in response_data:
-                        item_id: int = item.get('id')
-                        if cnt < MAX_ITEMS_IN_REQUEST:
-                            concatenated_ids += (';', '')[len(
-                                concatenated_ids) == 0] + str(item_id)
-                            cnt += 1
-                        else:
-                            logger.info('category %d, cnt %d !!2!!', category_id, cnt)
-                            self.ids_queue.put_nowait(
-                                (category_id, concatenated_ids))
-                            # if self.categories_queue.empty():
-                            #     self.complete.set()
-                            # if self.categories_queue.empty():
-                            #     self._categories_empty = True
-                            concatenated_ids = str(item_id)
-                            cnt = 1
-                    # старая реализация ^^^
-
-                    attempts_counter = 0
-                    page += 1
-                except (json.decoder.JSONDecodeError, AttributeError) as error:
-                    attempts_counter -= 1
-                    if not attempts_counter:
-                        logger.critical(error)
-                        sys.exit()
-                    logger.info('request error at: %s, %d tries left',
-                                url, attempts_counter)
-
-    async def get_cards(self) -> None:
+    async def _get_cards(self) -> None:
         while True:
-            if self.categories_queue.empty():
-                self.complete.set()
             category_id: int
             concatenated_ids: str
-            category_id, concatenated_ids = await self.ids_queue.get()
+            category_id, concatenated_ids = await self._ids_queue.get()
 
             base_url: str = (f'https://card.wb.ru/cards/detail?'
                              f'spp=30{QUERY_PARAMS}&nm=')
 
-            async with aiohttp.ClientSession() as session:
-                url: str = base_url + concatenated_ids
+            url: str = base_url + concatenated_ids
 
-                async with session.get(url) as response:
-                    response: dict = await response.json(content_type=None)
-                    response_data: list[dict] = (
-                        response.get('data').get('products'))
+            response = await self._get_data(url)
+            response_data: list[dict] = (
+                response.get('data').get('products'))
 
-            logger.info('category %d, len_response_data %d -- get_cards',
-                        category_id, len(response_data))
+            # logger.info('category %d, len_response_data %d -- get_cards',
+            #             category_id, len(response_data))
 
-            await self.cards_queue.put((category_id, response_data))
-            if self.ids_queue.empty():
-                self.complete.set()
+            self._cards_queue.put_nowait((category_id, response_data))
+
+            self._ids_queue.task_done()
+
             logger.info(f'got cards chunk for {category_id}')
 
-    async def collect_data(self) -> None:
+    async def _collect_data(self) -> None:
         while True:
-            if self.ids_queue.empty():
-                self.complete.set()
             category_id: int
             cards: list[dict]
-            category_id, cards = await self.cards_queue.get()
-
+            category_id, cards = await self._cards_queue.get()
+            a = 1
             for item in cards:
 
                 card_object: dict = {
@@ -398,7 +315,7 @@ class ItemsParser:
 
                 card_object['articles_history'] = {
                     'article': item.get('id'),
-                    'timestamp': self.timestamp,
+                    'timestamp': self._timestamp,
                     'price_full': item.get('priceU'),
                     'price_with_discount': item.get('salePriceU'),
                     'sale': item.get('sale'),
@@ -434,24 +351,25 @@ class ItemsParser:
                 card_object['articles_history'].update(
                     {'sum_count': sum_count})
 
-                await self.db_queue.put(card_object)
+                self._db_queue.put_nowait(card_object)
+
+            self._cards_queue.task_done()
 
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
-    async def write_to_db(self) -> None:
+    async def _write_to_db(self) -> None:
         while True:
-            if self.cards_queue.empty():
-                self.complete.set()
-            card = await self.db_queue.get()
+            card = await self._db_queue.get()
 
             global items_count
             items_count += 1
+            if items_count % 100000 == 0:
+                logger.critical('ITEMS COUNT <<< %d >>>', items_count)
 
             # your code here
 
-            # if self.db_queue.empty():
-            #     self.complete.set()
+            self._db_queue.task_done()
 
 
 async def load_all_items() -> None:
@@ -461,15 +379,20 @@ async def load_all_items() -> None:
     session: AsyncSession = await anext(db)
 
     async with session.begin():
-        selectable: Select = select(Category).where(Category.id.in_([130267, 130274]))
-        # selectable: Select = select(Category)
+        # selectable: Select = select(Category).where(Category.id.in_([130267, 130274]))
+        selectable: Select = select(Category)
+        # selectable: Select = select(Category).where(Category.id.in_([130558]))
         categories = await session.execute(selectable)
-        parser = ItemsParser()
+
+    async with ClientSession() as client_session:
+        parser = ItemsParser(client_session)
+
         await parser.start(categories)
+
 
     finish: float = time.time()
     impl_time: float = finish - start
-    logger.info('got %d items in %d seconds', items_count, impl_time)
+    logger.info('got %d items in %d seconds, %d requests', items_count, impl_time, parser._req_counter)
 
 # 130267 3399
 # 130274 1540
