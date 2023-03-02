@@ -2,7 +2,7 @@ import logging
 from logging.config import dictConfig
 
 
-DEFAULT_LEVEL = "INFO"
+DEFAULT_LEVEL = "CRITICAL"
 
 
 logging_schema = {
