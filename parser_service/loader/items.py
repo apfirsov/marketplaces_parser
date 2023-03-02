@@ -3,6 +3,7 @@ import json
 import sys
 import time
 from asyncio import Queue, Semaphore, Task, create_task
+import datetime
 
 import pydantic
 from aiohttp import ClientSession
@@ -43,7 +44,7 @@ class ItemsParser:
 
     def __init__(self, client_session: ClientSession) -> None:
         self._session: ClientSession = client_session
-        self._timestamp: float = time.time()
+        self._timestamp: float = datetime.datetime.now()
         self._request_semaphore = Semaphore(REQUEST_LIMIT)
         self._categories_queue: Queue = Queue()
         self._ids_queue: Queue = Queue()
@@ -378,6 +379,7 @@ class ItemsParser:
 
             db = get_db()
             session: AsyncSession = await anext(db)
+            # session = self._session
 
             colors: list = card.get("colors")
             sizes: list = card.get("sizes")
@@ -393,11 +395,11 @@ class ItemsParser:
 
                 for color in colors:
                     color_res = await session.execute(
-                            select(Color).where(Color.id == color.get("id"))
+                            select(Color).where(Color.id == color["id"])
                         )
                     color_obj = color_res.first()
                     if color_obj is None:
-                        session.add(Color(**color))
+                        color_obj = session.add(Color(**color))
 
                 brand = Brand(**brands)
                 brand_res = await session.execute(
@@ -419,54 +421,58 @@ class ItemsParser:
                 article_res = await session.execute(
                             select(Article).where(Article.id == article.id)
                         )
-                obj = article_res.first()
-                if obj is None:
+
+                if article_res.first() is None:
                     session.add(article)
+                obj = ArticlesHistory(**articles_history)
+                session.add(obj)
+                await session.flush()
 
-                article_history = ArticlesHistory(**articles_history)
-                article_history_res = await session.execute(
-                            select(ArticlesHistory)
-                            .where(ArticlesHistory.
-                                   article == article_history.article)
-                        )
-                article_history_obj = article_history_res.first()
-                if article_history_obj is None:
-                    session.add(article_history)
-
+                # await session.commit()
+                
+                # article_history_res = await session.execute(
+                #             select(ArticlesHistory)
+                #             .where(ArticlesHistory.
+                #                    article == articles_history["article"])
+                #         )
+                # article_history_obj = article_history_res.first()
+                # if article_history_obj is None:
+                # session.add(ArticlesHistory(**articles_history))
+                stmt = select(Size).where(Size.name.in_([i["name"] for i in sizes]))
+                res = await session.execute(stmt)
                 for i in sizes:
                     res = await session.execute(
-                        select(Size).where(Size.name == i.get("name"))
+                        select(Size).where(Size.name == i["name"])
                     )
                     obj = res.first()
                     if obj is None:
-                        session.add(Size(name=i.get("name")))
+                        session.add(Size(name=i["name"]))
 
-                art_res = await session.execute(
-                        select(ArticlesHistory)
-                        .where(ArticlesHistory.
-                               article == article_history.article)
-                    )
+                # art_res = await session.execute(
+                #         select(ArticlesHistory)
+                #         .where(ArticlesHistory.
+                #                article == article_history.article)
+                #     )
 
-                for row in art_res.first():
-                    article_id = row.id
+                # for row in art_res.first():
+                #     article_id = row.id
 
-                for i in sizes:
-                    res = await session.execute(
-                        select(Size).where(Size.name == i.get("name"))
-                    )
-                    obj = res.first()
-                    for row in obj:
-                        size_id = row.id
+                # for i in sizes:
+                #     res = await session.execute(
+                #         select(Size).where(Size.name == i.get("name"))
+                #     )
+                #     obj = res.first()
+                #     for row in obj:
+                #         size_id = row.id
 
-                    history_size_relation = HistorySizeRelation(
-                        history=article_id,
-                        size=size_id,
-                        count=i.get("count")
-                    )
+                #     history_size_relation = HistorySizeRelation(
+                #         history=article_id,
+                #         size=size_id,
+                #         count=i.get("count")
+                #     )
 
-                session.add(history_size_relation)
+                #     session.add(history_size_relation)
                 await session.commit()
-
             self._db_queue.task_done()
 
 
@@ -477,8 +483,8 @@ async def load_all_items() -> None:
     session: AsyncSession = await anext(db)
 
     async with session.begin():
-        # selectable: Select = select(Category).where(Category.id.in_([130267, 130274]))
-        selectable: Select = select(Category)
+        selectable: Select = select(Category).where(Category.id.in_([130268]))
+        # selectable: Select = select(Category)
         # selectable: Select = select(Category).where(Category.id.in_([130558]))
         categories = await session.execute(selectable)
 
