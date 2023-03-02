@@ -12,6 +12,15 @@ from logger_config import parser_logger as logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.selectable import Select
+from db.models import (
+    Color,
+    Brand,
+    Item,
+    Article,
+    ArticlesHistory,
+    Size,
+    HistorySizeRelation
+)
 
 from constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
                         MAX_BRANDS_IN_REQUEST, MAX_ITEMS_IN_BRANDS_FILTER,
@@ -367,7 +376,96 @@ class ItemsParser:
             if items_count % 100000 == 0:
                 logger.critical('ITEMS COUNT <<< %d >>>', items_count)
 
-            # your code here
+            db = get_db()
+            session: AsyncSession = await anext(db)
+
+            colors: list = card.get("colors")
+            sizes: list = card.get("sizes")
+            brands: dict = card.get("brands")
+            items: dict = card.get("items")
+            articles: dict = card.get("articles")
+            articles_history: dict = card.get("articles_history")
+
+            # time_stamp = datetime.datetime.now()
+            # articles_history["timestamp"] = time_stamp  # подменил timestamp
+
+            async with session.begin():
+
+                for color in colors:
+                    color_res = await session.execute(
+                            select(Color).where(Color.id == color.get("id"))
+                        )
+                    color_obj = color_res.first()
+                    if color_obj is None:
+                        session.add(Color(**color))
+
+                brand = Brand(**brands)
+                brand_res = await session.execute(
+                            select(Brand).where(Brand.id == brand.id)
+                        )
+                obj = brand_res.first()
+                if obj is None:
+                    session.add(brand)
+
+                item = Item(**items)
+                items_res = await session.execute(
+                            select(Item).where(Item.id == item.id)
+                        )
+                obj = items_res.first()
+                if obj is None:
+                    session.add(item)
+
+                article = Article(**articles)
+                article_res = await session.execute(
+                            select(Article).where(Article.id == article.id)
+                        )
+                obj = article_res.first()
+                if obj is None:
+                    session.add(article)
+
+                article_history = ArticlesHistory(**articles_history)
+                article_history_res = await session.execute(
+                            select(ArticlesHistory)
+                            .where(ArticlesHistory.
+                                   article == article_history.article)
+                        )
+                article_history_obj = article_history_res.first()
+                if article_history_obj is None:
+                    session.add(article_history)
+
+                for i in sizes:
+                    res = await session.execute(
+                        select(Size).where(Size.name == i.get("name"))
+                    )
+                    obj = res.first()
+                    if obj is None:
+                        session.add(Size(name=i.get("name")))
+
+                art_res = await session.execute(
+                        select(ArticlesHistory)
+                        .where(ArticlesHistory.
+                               article == article_history.article)
+                    )
+
+                for row in art_res.first():
+                    article_id = row.id
+
+                for i in sizes:
+                    res = await session.execute(
+                        select(Size).where(Size.name == i.get("name"))
+                    )
+                    obj = res.first()
+                    for row in obj:
+                        size_id = row.id
+
+                    history_size_relation = HistorySizeRelation(
+                        history=article_id,
+                        size=size_id,
+                        count=i.get("count")
+                    )
+
+                session.add(history_size_relation)
+                await session.commit()
 
             self._db_queue.task_done()
 
