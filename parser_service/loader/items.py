@@ -68,8 +68,8 @@ class ItemsParser:
         for _ in range(WORKER_COUNT):
             create_task(self._get_cards())
             create_task(self._collect_data())
-            create_task(self._write_to_db())
             create_task(self._get_items_ids())
+        create_task(self._write_to_db())
 
         await create_task(self._waiter())
 
@@ -379,100 +379,131 @@ class ItemsParser:
 
             db = get_db()
             session: AsyncSession = await anext(db)
-            # session = self._session
 
-            colors: list = card.get("colors")
-            sizes: list = card.get("sizes")
-            brands: dict = card.get("brands")
-            items: dict = card.get("items")
-            articles: dict = card.get("articles")
-            articles_history: dict = card.get("articles_history")
-
-            # time_stamp = datetime.datetime.now()
-            # articles_history["timestamp"] = time_stamp  # подменил timestamp
+            colors: list = card["colors"]
+            sizes: list = card["sizes"]
+            brands: dict = card["brands"]
+            items: dict = card["items"]
+            articles: dict = card["articles"]
+            articles_history: dict = card["articles_history"]
 
             async with session.begin():
+                # colors in db
+                try:
+                    for color in colors:
+                        result = await session.execute(
+                                select(Color).where(Color.id == color["id"])
+                            )
+                        color_in_db = result.first()
+                        if color_in_db is None:
+                            session.add(Color(**color))
+                    
+                    # brands in db
+                    result = await session.execute(
+                                select(Brand).where(Brand.id == brands["id"])
+                            )
+                    brand_in_db = result.first()
+                    if brand_in_db is None:
+                        session.add(Brand(**brands))
 
-                for color in colors:
-                    color_res = await session.execute(
-                            select(Color).where(Color.id == color["id"])
+                    # items in db
+                    result = await session.execute(
+                                select(Item).where(Item.id == items["id"])
+                            )
+                    items_in_db = result.first()
+                    if items_in_db is None:
+                        session.add(Item(**items))
+
+                    # articles id db
+                    result = await session.execute(
+                                select(Article).where(Article.id == articles["id"])
+                            )
+                    if result.first() is None:
+                        session.add(Article(**articles))
+
+                    # articles_history in db
+                    history_in_db = ArticlesHistory(**articles_history)
+                    session.add(history_in_db)
+
+                    # size in db
+                    db_sizes = {}
+                    for size in sizes:
+                        # result = await session.execute(
+                        #         select(Size).where(Size.name == size["name"])
+                        #     )
+                        # size_in_db = result.first()
+                        res = await session.scalars(
+                            select(Size).where(Size.name == size["name"]))
+                        size_in_db = res.one_or_none()
+                        if size_in_db is None:
+                            size_in_db = Size(name=size["name"])
+                            session.add(size_in_db)
+                        db_sizes[size["name"]] = (size["count"], size_in_db)
+                        # size_list.append(size_in_db)
+
+                    await session.flush()
+
+                    for count, size_in_db in db_sizes.values():
+                        history_size_relation = HistorySizeRelation(
+                            history=history_in_db.id,
+                            size=size_in_db.id,
+                            count=count
                         )
-                    color_obj = color_res.first()
-                    if color_obj is None:
-                        color_obj = session.add(Color(**color))
+                        session.add(history_size_relation)
+                    await session.flush()
+                    
+                    # history_size_relation in db
+                    # stmt = select(Size).where(Size.name.in_(
+                    #     [i["name"] for i in sizes]
+                    # ))
+                    # sizes_in_db = await session.execute(stmt)
 
-                brand = Brand(**brands)
-                brand_res = await session.execute(
-                            select(Brand).where(Brand.id == brand.id)
-                        )
-                obj = brand_res.first()
-                if obj is None:
-                    session.add(brand)
+                    # history = await session.execute(
+                    #     select(ArticlesHistory)
+                    #     .where(ArticlesHistory.article == articles_history["article"])
+                    # )
 
-                item = Item(**items)
-                items_res = await session.execute(
-                            select(Item).where(Item.id == item.id)
-                        )
-                obj = items_res.first()
-                if obj is None:
-                    session.add(item)
+                    # counts = [i["count"] for i in sizes]
 
-                article = Article(**articles)
-                article_res = await session.execute(
-                            select(Article).where(Article.id == article.id)
-                        )
+                    
 
-                if article_res.first() is None:
-                    session.add(article)
-                obj = ArticlesHistory(**articles_history)
-                session.add(obj)
-                await session.flush()
 
-                # await session.commit()
-                
-                # article_history_res = await session.execute(
-                #             select(ArticlesHistory)
-                #             .where(ArticlesHistory.
-                #                    article == articles_history["article"])
-                #         )
-                # article_history_obj = article_history_res.first()
-                # if article_history_obj is None:
-                # session.add(ArticlesHistory(**articles_history))
-                stmt = select(Size).where(Size.name.in_([i["name"] for i in sizes]))
-                res = await session.execute(stmt)
-                for i in sizes:
-                    res = await session.execute(
-                        select(Size).where(Size.name == i["name"])
-                    )
-                    obj = res.first()
-                    if obj is None:
-                        session.add(Size(name=i["name"]))
+                    # counts = [i["count"] i for i in sizes:]
+                    #     res = await session.execute(
+                    #         select(Size).where(Size.name == i["name"])
+                    #     )
+                    #     obj = res.first()
+                    #     if obj is None:
+                    #         session.add(Size(name=i["name"]))
 
-                # art_res = await session.execute(
-                #         select(ArticlesHistory)
-                #         .where(ArticlesHistory.
-                #                article == article_history.article)
-                #     )
+                    # art_res = await session.execute(
+                    #         select(ArticlesHistory)
+                    #         .where(ArticlesHistory.
+                    #                article == article_history.article)
+                    #     )
 
-                # for row in art_res.first():
-                #     article_id = row.id
+                    # for row in art_res.first():
+                    #     article_id = row.id
 
-                # for i in sizes:
-                #     res = await session.execute(
-                #         select(Size).where(Size.name == i.get("name"))
-                #     )
-                #     obj = res.first()
-                #     for row in obj:
-                #         size_id = row.id
+                    # for i in sizes:
+                    #     res = await session.execute(
+                    #         select(Size).where(Size.name == i.get("name"))
+                    #     )
+                    #     obj = res.first()
+                    #     for row in obj:
+                    #         size_id = row.id
 
-                #     history_size_relation = HistorySizeRelation(
-                #         history=article_id,
-                #         size=size_id,
-                #         count=i.get("count")
-                #     )
+                    #     history_size_relation = HistorySizeRelation(
+                    #         history=article_id,
+                    #         size=size_id,
+                    #         count=i.get("count")
+                    #     )
 
-                #     session.add(history_size_relation)
-                await session.commit()
+                    #     session.add(history_size_relation)
+                    await session.commit()
+                except Exception as err:
+                    print(err, "!!!!!!!!!!!!!!!")
+                    raise err
             self._db_queue.task_done()
 
 
@@ -483,8 +514,8 @@ async def load_all_items() -> None:
     session: AsyncSession = await anext(db)
 
     async with session.begin():
-        selectable: Select = select(Category).where(Category.id.in_([130268]))
-        # selectable: Select = select(Category)
+        # selectable: Select = select(Category).where(Category.id.in_([63010]))
+        selectable: Select = select(Category)
         # selectable: Select = select(Category).where(Category.id.in_([130558]))
         categories = await session.execute(selectable)
 
