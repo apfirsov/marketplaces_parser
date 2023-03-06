@@ -58,9 +58,9 @@ class ItemsParser:
         for _ in range(WORKER_COUNT):
             create_task(self._get_cards())
             create_task(self._collect_data())
-            create_task(self._write_to_db())
             create_task(self._get_items_ids())
 
+        create_task(self._write_to_db())
         await create_task(self._waiter())
 
     async def _waiter(self) -> None:
@@ -102,33 +102,34 @@ class ItemsParser:
 
     async def _get_items_ids(self) -> None:
 
-        category = await self._categories_queue.get()
+        while True:
+            category = await self._categories_queue.get()
 
-        start: float = time.time()
-        category_id: int = category.get('id')
-        shard: str = category.get('shard')
-        query: str = category.get('query')
-        price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
-                                 f'filters?{query}{QUERY_PARAMS}')
+            start: float = time.time()
+            category_id: int = category.get('id')
+            shard: str = category.get('shard')
+            query: str = category.get('query')
+            price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
+                                    f'filters?{query}{QUERY_PARAMS}')
 
-        response = await self._get_data(price_filter_url)
+            response = await self._get_data(price_filter_url)
 
-        ctg_filters: list[dict] = (
-            response.get('data').get('filters'))
-        for ctg_filter in ctg_filters:
-            if ctg_filter.get('key') == 'priceU':
-                ctg_max_price: int = ctg_filter.get('maxPriceU')  # !!!!!!
-                break
+            ctg_filters: list[dict] = (
+                response.get('data').get('filters'))
+            for ctg_filter in ctg_filters:
+                if ctg_filter.get('key') == 'priceU':
+                    ctg_max_price: int = ctg_filter.get('maxPriceU')  # !!!!!!
+                    break
 
-        await self._basic_parsing(
-            category_id, shard, query, 0, ctg_max_price)
+            await self._basic_parsing(
+                category_id, shard, query, 0, ctg_max_price)
 
-        self._categories_queue.task_done()
+            self._categories_queue.task_done()
 
-        finish: float = time.time()
-        impl_time: float = round(finish - start, 2)
-        logger.info('parsed %s %s in %d seconds',
-                    shard, query, impl_time)
+            finish: float = time.time()
+            impl_time: float = round(finish - start, 2)
+            logger.info('parsed %s %s in %d seconds',
+                        shard, query, impl_time)
 
     async def _basic_parsing(self, category_id: int,
                              shard: str,
@@ -202,7 +203,8 @@ class ItemsParser:
                 cnt = 1
         # кажется, это тут не нужно
         # TODO: Разобраться
-        # concatenated_ids_list.append(concatenated_ids[1:])
+        if concatenated_ids:
+            concatenated_ids_list.append(concatenated_ids[1:])
 
         number_of_requests: int = len(concatenated_ids_list)
 
@@ -224,33 +226,51 @@ class ItemsParser:
         logger.info('getting items ids chunks')
 
         page: int = 1
-        concatenated_ids: str = ''
-        cnt: int = 0
+
+        my_set = set()  #
+        base_url_asc = base_url + 'сортировка 1'  #
 
         while page <= MAX_PAGE:
-            url: str = base_url + '&page=' + str(page)
+            url: str = base_url_asc + '&page=' + str(page)  #
 
             response = await self._get_data(url)
             response_data: list[dict] = response.get('data').get('products')
 
             if not len(response_data):
-                # logger.info('category %d, cnt %d !!1!!', category_id, cnt)
-                self._ids_queue.put_nowait((category_id, concatenated_ids))
+                # self._ids_queue.put_nowait((category_id, concatenated_ids))
                 break
 
             for item in response_data:
                 item_id: int = item.get('id')
-                if cnt < MAX_ITEMS_IN_REQUEST:
-                    concatenated_ids += (';', '')[len(
-                        concatenated_ids) == 0] + str(item_id)
-                    cnt += 1
-                else:
-                    # logger.info('category %d, cnt %d !!2!!', category_id, cnt)
-                    self._ids_queue.put_nowait(
-                        (category_id, concatenated_ids))
-                    concatenated_ids = str(item_id)
-                    cnt = 1
+                # if cnt < MAX_ITEMS_IN_REQUEST:
+                #     concatenated_ids += (';', '')[len(
+                #         concatenated_ids) == 0] + str(item_id)
+                #     cnt += 1
+                # else:
+                #     self._ids_queue.put_nowait(
+                #         (category_id, concatenated_ids))
+                #     concatenated_ids = str(item_id)
+                #     cnt = 1
+                my_set.add(item_id)  #
             page += 1
+        if page == MAX_PAGE:
+            base_url_desc = base_url + 'сортировка 2'  #
+            page = 1
+            while page <= MAX_PAGE:
+                url: str = base_url_desc + '&page=' + str(page)  #
+                response = await self._get_data(url)
+                response_data: list[dict] = response.get('data').get('products')
+
+                for item in response_data:
+                    item_id: int = item.get('id')
+                    if item_id in my_set:
+                        break
+                    my_set.add(item_id)  #
+
+        concatenated_ids: str = ''
+        cnt: int = 0
+        #добавить условие с добавлением по 750 итемов
+        self._ids_queue.put_nowait((category_id, ';'.join(list(my_set))))
 
     async def _get_cards(self) -> None:
         while True:
