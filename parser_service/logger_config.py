@@ -28,8 +28,6 @@ logging_schema = {
             "filename": "parser_log.log",
             "mode": "a",
             "encoding": "utf-8",
-            "maxBytes": 500000,
-            "backupCount": 4
         }
     },
     "loggers": {

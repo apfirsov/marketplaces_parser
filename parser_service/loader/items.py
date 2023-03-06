@@ -368,6 +368,11 @@ class ItemsParser:
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
+    async def simple_create(self, entity, in_data, s) -> None:
+        item_in_db = await s.get(entity, in_data["id"])
+        if item_in_db is None:
+            s.add(entity(**in_data))
+
     async def _write_to_db(self) -> None:
         while True:
             card = await self._db_queue.get()
@@ -388,50 +393,22 @@ class ItemsParser:
             articles_history: dict = card["articles_history"]
 
             async with session.begin():
-                # colors in db
                 try:
+                    # TODO убрать цикл после доработки от Саши
                     for color in colors:
-                        result = await session.execute(
-                                select(Color).where(Color.id == color["id"])
-                            )
-                        color_in_db = result.first()
-                        if color_in_db is None:
-                            session.add(Color(**color))
-                    
-                    # brands in db
-                    result = await session.execute(
-                                select(Brand).where(Brand.id == brands["id"])
-                            )
-                    brand_in_db = result.first()
-                    if brand_in_db is None:
-                        session.add(Brand(**brands))
+                        await self.simple_create(Color, color, session)
 
-                    # items in db
-                    result = await session.execute(
-                                select(Item).where(Item.id == items["id"])
-                            )
-                    items_in_db = result.first()
-                    if items_in_db is None:
-                        session.add(Item(**items))
+                    await self.simple_create(Brand, brands, session)
+                    await self.simple_create(Item, items, session)
+                    await self.simple_create(Article, articles, session)
 
-                    # articles id db
-                    result = await session.execute(
-                                select(Article).where(Article.id == articles["id"])
-                            )
-                    if result.first() is None:
-                        session.add(Article(**articles))
-
-                    # articles_history in db
                     history_in_db = ArticlesHistory(**articles_history)
                     session.add(history_in_db)
 
                     # size in db
+                    # TODO доработать запись в БД Size
                     db_sizes = {}
                     for size in sizes:
-                        # result = await session.execute(
-                        #         select(Size).where(Size.name == size["name"])
-                        #     )
-                        # size_in_db = result.first()
                         res = await session.scalars(
                             select(Size).where(Size.name == size["name"]))
                         size_in_db = res.one_or_none()
@@ -439,10 +416,9 @@ class ItemsParser:
                             size_in_db = Size(name=size["name"])
                             session.add(size_in_db)
                         db_sizes[size["name"]] = (size["count"], size_in_db)
-                        # size_list.append(size_in_db)
-
                     await session.flush()
 
+                    # history_size_relation in db
                     for count, size_in_db in db_sizes.values():
                         history_size_relation = HistorySizeRelation(
                             history=history_in_db.id,
@@ -451,58 +427,9 @@ class ItemsParser:
                         )
                         session.add(history_size_relation)
                     await session.flush()
-                    
-                    # history_size_relation in db
-                    # stmt = select(Size).where(Size.name.in_(
-                    #     [i["name"] for i in sizes]
-                    # ))
-                    # sizes_in_db = await session.execute(stmt)
-
-                    # history = await session.execute(
-                    #     select(ArticlesHistory)
-                    #     .where(ArticlesHistory.article == articles_history["article"])
-                    # )
-
-                    # counts = [i["count"] for i in sizes]
-
-                    
-
-
-                    # counts = [i["count"] i for i in sizes:]
-                    #     res = await session.execute(
-                    #         select(Size).where(Size.name == i["name"])
-                    #     )
-                    #     obj = res.first()
-                    #     if obj is None:
-                    #         session.add(Size(name=i["name"]))
-
-                    # art_res = await session.execute(
-                    #         select(ArticlesHistory)
-                    #         .where(ArticlesHistory.
-                    #                article == article_history.article)
-                    #     )
-
-                    # for row in art_res.first():
-                    #     article_id = row.id
-
-                    # for i in sizes:
-                    #     res = await session.execute(
-                    #         select(Size).where(Size.name == i.get("name"))
-                    #     )
-                    #     obj = res.first()
-                    #     for row in obj:
-                    #         size_id = row.id
-
-                    #     history_size_relation = HistorySizeRelation(
-                    #         history=article_id,
-                    #         size=size_id,
-                    #         count=i.get("count")
-                    #     )
-
-                    #     session.add(history_size_relation)
                     await session.commit()
                 except Exception as err:
-                    print(err, "!!!!!!!!!!!!!!!")
+                    logger.critical("!!!!!!Error write_to_db!!!! %s", err)
                     raise err
             self._db_queue.task_done()
 
@@ -515,8 +442,8 @@ async def load_all_items() -> None:
 
     async with session.begin():
         # selectable: Select = select(Category).where(Category.id.in_([63010]))
-        selectable: Select = select(Category)
-        # selectable: Select = select(Category).where(Category.id.in_([130558]))
+        # selectable: Select = select(Category)
+        selectable: Select = select(Category).where(Category.id.in_([130558]))
         categories = await session.execute(selectable)
 
     async with ClientSession() as client_session:
