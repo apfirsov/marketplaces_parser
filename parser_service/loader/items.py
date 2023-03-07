@@ -5,18 +5,19 @@ from asyncio import Queue, Semaphore, create_task
 
 import pydantic
 from aiohttp import ClientSession
-from constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
-                       MAX_BRANDS_IN_REQUEST, MAX_ITEMS_IN_BRANDS_FILTER,
-                       MAX_ITEMS_IN_REQUEST, MAX_PAGE, MIN_PRICE_RANGE,
-                       QUERY_PARAMS, REQUEST_LIMIT, WORKER_COUNT)
+from constants import (ATTEMPTS_COUNTER, BASE_URL, CARD_URL,
+                       LAST_PAGE_TRESHOLD, MAX_BRANDS_IN_REQUEST,
+                       MAX_ITEMS_IN_BRANDS_FILTER, MAX_ITEMS_IN_REQUEST,
+                       MAX_PAGE, MIN_PRICE_RANGE, QUERY_PARAMS, REQUEST_LIMIT,
+                       WORKER_COUNT)
 from db.models import Category
 from db.session import get_db
 from logger_config import parser_logger as logger
-from schemas import ArticleSchema, ColorSchema
+from schemas import ArticleSchema
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-items_count = 0
+items_cnt = 0
 items_set = set()
 
 # TODO: Синхронные логи (асинк или сократить количество логирования)
@@ -71,7 +72,7 @@ class ItemsParser:
 
     async def _get_data(self, url: str) -> dict:
         async with self._request_semaphore:
-            attempts_counter: int = ATTEMPTS_COUNTER
+            attempts_counter = ATTEMPTS_COUNTER
 
             while attempts_counter:
                 try:
@@ -84,7 +85,7 @@ class ItemsParser:
                                     response.status, url)
 
                 except Exception as err:
-                    logger.info('request error occured at: %s, %s', url, err)
+                    logger.info('request error at: %s, %s', url, err)
 
                 logger.info('request at: %s, %d tries left',
                             url, attempts_counter)
@@ -149,9 +150,6 @@ class ItemsParser:
 
     async def _parse_by_brand(self, category_id: int, shard: str, query: str,
                               price_lmt: str) -> list[int]:
-        logger.info(
-            'parsing by brand for %s, price range %s', category_id, price_lmt)
-
         base_url = (f'{BASE_URL}{shard}/catalog?'
                     f'{query}{QUERY_PARAMS}{price_lmt}')
         brand_filter_url = (f'{BASE_URL}{shard}/v4/filters?filters='
@@ -160,7 +158,6 @@ class ItemsParser:
         response = await self._get_data(brand_filter_url)
 
         brand_filters = response.get('data').get('filters')[0].get('items')
-
         concatenated_ids_list = []
         concatenated_ids = ''
         cnt = 1
@@ -185,11 +182,9 @@ class ItemsParser:
             request_url = base_url + '&fbrand=' + string
             await self._get_items_ids_chunk(category_id, request_url)
 
-            logger.info('brand parsing for %s, %s: %d / %d requests done',
-                        category_id, price_lmt, idx, len(concatenated_ids_list))
-
-        logger.info('parsing by brand for section %s, price range %s done',
-                    category_id, price_lmt)
+            logger.info(
+                'brand parsing for %s, %s: %d / %d requests done',
+                category_id, price_lmt, idx, len(concatenated_ids_list))
 
     async def _traverse_pages(self, base_url: str, sorting: str) -> set:
         traversed_ids = set()
@@ -215,8 +210,6 @@ class ItemsParser:
 
     async def _get_items_ids_chunk(
             self, category_id: int, base_url: str) -> None:
-        logger.info('getting items ids chunks')
-
         traversed_ids = await self._traverse_pages(base_url, '&sort=popular')
 
         concatenated_ids = ''
@@ -236,23 +229,19 @@ class ItemsParser:
         while True:
             category_id, concatenated_ids = await self._ids_queue.get()
 
-            base_url = ('https://card.wb.ru/cards/detail?'
-                        f'spp=30{QUERY_PARAMS}&nm=')
-            url = base_url + concatenated_ids
+            url = CARD_URL + concatenated_ids
             response = await self._get_data(url)
             response_data = response.get('data').get('products')
 
             self._cards_queue.put_nowait((category_id, response_data))
             self._ids_queue.task_done()
 
-            logger.info(f'got cards chunk for {category_id}')
-
     async def _collect_data(self) -> None:
         while True:
             category_id, cards = await self._cards_queue.get()
 
             for item in cards:
-                card_object = {'colors': [], 'sizes': []}
+                card_object = {'colors': {}, 'sizes': {}}
                 try:
                     article_data = ArticleSchema(**item).dict()
                 except pydantic.ValidationError:
@@ -288,12 +277,13 @@ class ItemsParser:
                 }
 
                 colors = article_data.get('colors')
-                for color in colors:
-                    color_object = ColorSchema(**color)
-                    card_object['colors'].append(color_object.dict())
+                if colors:
                     card_object['articles'].update(
-                        {'color': 999999} if len(colors) > 1 else
-                        {'color': color.get('id')})
+                            {'color': 999999} if len(colors) > 1 else
+                            {'color': colors[0].get('id')})
+                    for color in colors:
+                        card_object['colors'].update(
+                            {color.get('id'): color.get('name')})
 
                 sum_count = 0
                 hash_sizes = {}
@@ -307,10 +297,7 @@ class ItemsParser:
                     hash_sizes[size_name] = size_count
                     sum_count += size_count
 
-                    card_object['sizes'].append({
-                        'name': size_name,
-                        'count': size_count
-                    })
+                    card_object['sizes'].update({size_name: size_count})
 
                 card_object['articles_history'].update(
                     {'sum_count': sum_count})
@@ -325,13 +312,13 @@ class ItemsParser:
         while True:
             card = await self._db_queue.get()
 
-            global items_count
-            items_count += 1
+            global items_cnt
+            items_cnt += 1
             global items_set
             items_set.add(card['articles']['id'])
 
-            if items_count % 10000 == 0:
-                logger.critical('ITEMS COUNT <<< %d >>>', items_count)
+            if items_cnt % 10000 == 0:
+                logger.critical('ITEMS COUNT <<< %d >>>', items_cnt)
 
             # your code here
 
@@ -346,7 +333,7 @@ async def load_all_items() -> None:
 
     async with session.begin():
         selectable = select(Category)
-        selectable = select(Category).where(Category.id.in_([130545]))
+        # selectable = select(Category).where(Category.id.in_([63010]))
         categories = await session.execute(selectable)
 
     async with ClientSession() as client_session:
@@ -356,8 +343,8 @@ async def load_all_items() -> None:
 
     finish = time.time()
     impl_time = finish - start
-    logger.info('got %d items in %d seconds, %d requests, set length - %d',
-                items_count, impl_time, parser._req_counter, len(items_set))
+    logger.critical('got %d items in %d seconds, %d requests, set length - %d',
+                    items_cnt, impl_time, parser._req_counter, len(items_set))
 
 
 # 130545 30930

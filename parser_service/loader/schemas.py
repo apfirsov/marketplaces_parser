@@ -56,8 +56,3 @@ class ArticleSchema(BaseModel):
     feedbacks: int
     colors: list[dict]
     sizes: list[dict]
-
-
-class ColorSchema(BaseModel):
-    id: int
-    name: str
