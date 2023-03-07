@@ -368,7 +368,7 @@ class ItemsParser:
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
-    async def simple_create(self, entity, in_data, s) -> None:
+    async def _simple_create(self, entity, in_data, s) -> None:
         item_in_db = await s.get(entity, in_data["id"])
         if item_in_db is None:
             s.add(entity(**in_data))
@@ -394,19 +394,19 @@ class ItemsParser:
 
             async with session.begin():
                 try:
-                    # TODO убрать цикл после доработки от Саши
+                    # TODO Убрать цикл после доработки от Саши
                     for color in colors:
-                        await self.simple_create(Color, color, session)
+                        await self._simple_create(Color, color, session)
 
-                    await self.simple_create(Brand, brands, session)
-                    await self.simple_create(Item, items, session)
-                    await self.simple_create(Article, articles, session)
+                    await self._simple_create(Brand, brands, session)
+                    await self._simple_create(Item, items, session)
+                    await self._simple_create(Article, articles, session)
 
                     history_in_db = ArticlesHistory(**articles_history)
                     session.add(history_in_db)
 
                     # size in db
-                    # TODO доработать запись в БД Size
+                    # TODO Доработать запись в БД Size
                     db_sizes = {}
                     for size in sizes:
                         res = await session.scalars(
@@ -420,17 +420,20 @@ class ItemsParser:
 
                     # history_size_relation in db
                     for count, size_in_db in db_sizes.values():
-                        history_size_relation = HistorySizeRelation(
-                            history=history_in_db.id,
-                            size=size_in_db.id,
-                            count=count
+                        session.add(
+                            HistorySizeRelation(
+                                history=history_in_db.id,
+                                size=size_in_db.id,
+                                count=count
+                            )
                         )
-                        session.add(history_size_relation)
-                    await session.flush()
-                    await session.commit()
+
                 except Exception as err:
+                    await session.rollback()
                     logger.critical("!!!!!!Error write_to_db!!!! %s", err)
                     raise err
+                else:
+                    await session.commit()
             self._db_queue.task_done()
 
 
