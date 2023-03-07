@@ -1,25 +1,23 @@
 import asyncio
-import json
 import sys
 import time
-from asyncio import Queue, Semaphore, Task, create_task
+from asyncio import Queue, Semaphore, create_task
 
 import pydantic
 from aiohttp import ClientSession
-from db.models import Category
-from db.session import get_db
-from logger_config import parser_logger as logger
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.selectable import Select
-
 from constants import (ATTEMPTS_COUNTER, BASE_URL, LAST_PAGE_TRESHOLD,
                        MAX_BRANDS_IN_REQUEST, MAX_ITEMS_IN_BRANDS_FILTER,
                        MAX_ITEMS_IN_REQUEST, MAX_PAGE, MIN_PRICE_RANGE,
                        QUERY_PARAMS, REQUEST_LIMIT, WORKER_COUNT)
+from db.models import Category
+from db.session import get_db
+from logger_config import parser_logger as logger
 from schemas import ArticleSchema, ColorSchema
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-items_count: int = 0
+items_count = 0
+items_set = set()
 
 # TODO: Синхронные логи (асинк или сократить количество логирования)
 # TODO: Проверить алгоритмы фильтрации
@@ -33,13 +31,13 @@ items_count: int = 0
 class ItemsParser:
 
     def __init__(self, client_session: ClientSession) -> None:
-        self._session: ClientSession = client_session
-        self._timestamp: float = time.time()
+        self._session = client_session
+        self._timestamp = time.time()
         self._request_semaphore = Semaphore(REQUEST_LIMIT)
-        self._categories_queue: Queue = Queue()
-        self._ids_queue: Queue = Queue()
-        self._cards_queue: Queue = Queue()
-        self._db_queue: Queue = Queue()
+        self._categories_queue = Queue()
+        self._ids_queue = Queue()
+        self._cards_queue = Queue()
+        self._db_queue = Queue()
         self._queues = (
             self._categories_queue,
             self._ids_queue,
@@ -48,10 +46,10 @@ class ItemsParser:
         )
         self._req_counter = 0
 
-    async def start(self, categories):
+    async def start(self, categories) -> None:
         for category in categories.scalars():
             category_as_dict = category.__dict__
-            shard: str = category_as_dict.get('shard')
+            shard = category_as_dict.get('shard')
             if shard and 'blackhole' not in shard and 'preset' not in shard:
                 self._categories_queue.put_nowait(category_as_dict)
 
@@ -100,20 +98,18 @@ class ItemsParser:
         while True:
             category = await self._categories_queue.get()
 
-            start: float = time.time()
-            category_id: int = category.get('id')
-            shard: str = category.get('shard')
-            query: str = category.get('query')
-            price_filter_url: str = (f'{BASE_URL}{shard}/v4/'
-                                     f'filters?{query}{QUERY_PARAMS}')
+            category_id = category.get('id')
+            shard = category.get('shard')
+            query = category.get('query')
+            price_filter_url = (f'{BASE_URL}{shard}/v4/'
+                                f'filters?{query}{QUERY_PARAMS}')
 
             response = await self._get_data(price_filter_url)
 
-            ctg_filters: list[dict] = (
-                response.get('data').get('filters'))
+            ctg_filters = response.get('data').get('filters')
             for ctg_filter in ctg_filters:
                 if ctg_filter.get('key') == 'priceU':
-                    ctg_max_price: int = ctg_filter.get('maxPriceU')  # !!!!!!
+                    ctg_max_price = ctg_filter.get('maxPriceU')
                     break
 
             await self._basic_parsing(
@@ -121,10 +117,7 @@ class ItemsParser:
 
             self._categories_queue.task_done()
 
-            finish: float = time.time()
-            impl_time: float = round(finish - start, 2)
-            logger.info('parsed %s %s in %d seconds',
-                        shard, query, impl_time)
+            logger.info('parsed %s %s', shard, query)
 
     async def _basic_parsing(self, category_id: int, shard: str, query: str,
                              min_pr: int, max_pr: int) -> None:
@@ -132,16 +125,13 @@ class ItemsParser:
                     shard, query, min_pr, max_pr)
 
         price_lmt = f'&priceU={min_pr};{max_pr}'
-
         base_url = (f'{BASE_URL}{shard}/catalog?'
                     f'{QUERY_PARAMS}&{query}{price_lmt}')
-
         last_page_url = base_url + '&page=' + str(MAX_PAGE)
 
         response = await self._get_data(last_page_url)
-        response_data: list[dict] = (
-            response.get('data').get('products'))
 
+        response_data = response.get('data').get('products')
         last_page_is_full = len(response_data) > LAST_PAGE_TRESHOLD
 
         if last_page_is_full:
@@ -159,19 +149,17 @@ class ItemsParser:
 
     async def _parse_by_brand(self, category_id: int, shard: str, query: str,
                               price_lmt: str) -> list[int]:
-        start = time.time()
         logger.info(
             'parsing by brand for %s, price range %s', category_id, price_lmt)
 
         base_url = (f'{BASE_URL}{shard}/catalog?'
                     f'{query}{QUERY_PARAMS}{price_lmt}')
-
         brand_filter_url = (f'{BASE_URL}{shard}/v4/filters?filters='
                             f'fbrand&{query}{QUERY_PARAMS}{price_lmt}')
 
         response = await self._get_data(brand_filter_url)
-        brand_filters: list[dict] = (
-            response.get('data').get('filters')[0].get('items'))
+
+        brand_filters = response.get('data').get('filters')[0].get('items')
 
         concatenated_ids_list = []
         concatenated_ids = ''
@@ -179,75 +167,61 @@ class ItemsParser:
 
         for brand in brand_filters:
             brand_id = brand.get('id')
-            brand_count = brand.get('count')
-            if brand_count > MAX_ITEMS_IN_BRANDS_FILTER:
+            if brand.get('count') > MAX_ITEMS_IN_BRANDS_FILTER:
                 concatenated_ids_list.append(str(brand_id))
             elif cnt < MAX_BRANDS_IN_REQUEST:
-                concatenated_ids = ';'.join([concatenated_ids, str(brand_id)])
+                concatenated_ids += (';', '')[len(
+                    concatenated_ids) == 0] + str(brand_id)
                 cnt += 1
             else:
-                concatenated_ids_list.append(concatenated_ids[1:])
+                concatenated_ids_list.append(concatenated_ids)
                 concatenated_ids = str(brand_id)
                 cnt = 1
 
         if concatenated_ids:
-            concatenated_ids_list.append(concatenated_ids[1:])
-
-        number_of_requests = len(concatenated_ids_list)
+            concatenated_ids_list.append(concatenated_ids)
 
         for idx, string in enumerate(concatenated_ids_list, 1):
             request_url = base_url + '&fbrand=' + string
             await self._get_items_ids_chunk(category_id, request_url)
 
             logger.info('brand parsing for %s, %s: %d / %d requests done',
-                        category_id, price_lmt, idx, number_of_requests)
+                        category_id, price_lmt, idx, len(concatenated_ids_list))
 
-        finish = time.time()
-        impl_time = round(finish - start, 2)
-        logger.info('parsing by brand for section %s, price range %s '
-                    'done in %d seconds', category_id, price_lmt, impl_time)
+        logger.info('parsing by brand for section %s, price range %s done',
+                    category_id, price_lmt)
+
+    async def _traverse_pages(self, base_url: str, sorting: str) -> set:
+        traversed_ids = set()
+        base_url = base_url + sorting
+        page = 1
+        while page <= MAX_PAGE:
+            url = base_url + '&page=' + str(page)
+            response = await self._get_data(url)
+            response_data = response.get('data').get('products')
+
+            if not len(response_data):
+                return traversed_ids
+
+            for item in response_data:
+                traversed_ids.add(item.get('id'))
+            page += 1
+        if sorting == '&sort=popular':
+            traversed_ids.update(
+                await self._traverse_pages(base_url, '&sort=pricedown'))
+            traversed_ids.update(
+                await self._traverse_pages(base_url, '&sort=priceup'))
+        return traversed_ids
 
     async def _get_items_ids_chunk(
             self, category_id: int, base_url: str) -> None:
-
         logger.info('getting items ids chunks')
 
-        page = 1
-        traversed_ids = set()
-        base_url_asc = base_url + '&sort=priceup'
-
-        while page <= MAX_PAGE:
-            url = base_url_asc + '&page=' + str(page)
-
-            response = await self._get_data(url)
-            response_data: list[dict] = response.get('data').get('products')
-
-            if not len(response_data):
-                break
-
-            for item in response_data:
-                item_id = item.get('id')
-                traversed_ids.add(item_id)
-
-            page += 1
-        if page >= MAX_PAGE:
-            base_url_desc = base_url + '&sort=pricedown'
-            page = 1
-            while page <= MAX_PAGE:
-                url = base_url_desc + '&page=' + str(page)
-                resp = await self._get_data(url)
-                response_data: list[dict] = resp.get('data').get('products')
-
-                for item in response_data:
-                    item_id = item.get('id')
-                    if item_id in traversed_ids:
-                        break
-                    traversed_ids.add(item_id)
-                page += 1
+        traversed_ids = await self._traverse_pages(base_url, '&sort=popular')
 
         concatenated_ids = ''
         cnt = 0
-        for item in traversed_ids:
+        for item_id in traversed_ids:
             if cnt < MAX_ITEMS_IN_REQUEST:
                 concatenated_ids += (';', '')[len(
                     concatenated_ids) == 0] + str(item_id)
@@ -260,41 +234,25 @@ class ItemsParser:
 
     async def _get_cards(self) -> None:
         while True:
-            category_id: int
-            concatenated_ids: str
             category_id, concatenated_ids = await self._ids_queue.get()
 
-            base_url: str = (f'https://card.wb.ru/cards/detail?'
-                             f'spp=30{QUERY_PARAMS}&nm=')
-
-            url: str = base_url + concatenated_ids
-
+            base_url = ('https://card.wb.ru/cards/detail?'
+                        f'spp=30{QUERY_PARAMS}&nm=')
+            url = base_url + concatenated_ids
             response = await self._get_data(url)
-            response_data: list[dict] = (
-                response.get('data').get('products'))
-
-            # logger.info('category %d, len_response_data %d -- get_cards',
-            #             category_id, len(response_data))
+            response_data = response.get('data').get('products')
 
             self._cards_queue.put_nowait((category_id, response_data))
-
             self._ids_queue.task_done()
 
             logger.info(f'got cards chunk for {category_id}')
 
     async def _collect_data(self) -> None:
         while True:
-            category_id: int
-            cards: list[dict]
             category_id, cards = await self._cards_queue.get()
-            a = 1
+
             for item in cards:
-
-                card_object: dict = {
-                    'colors': [],
-                    'sizes': []
-                }
-
+                card_object = {'colors': [], 'sizes': []}
                 try:
                     article_data = ArticleSchema(**item).dict()
                 except pydantic.ValidationError:
@@ -329,7 +287,7 @@ class ItemsParser:
                     'feedbacks': item.get('feedbacks'),
                 }
 
-                colors: list[dict] = article_data.get('colors')
+                colors = article_data.get('colors')
                 for color in colors:
                     color_object = ColorSchema(**color)
                     card_object['colors'].append(color_object.dict())
@@ -337,13 +295,13 @@ class ItemsParser:
                         {'color': 999999} if len(colors) > 1 else
                         {'color': color.get('id')})
 
-                sum_count: int = 0
-                hash_sizes: dict = {}
+                sum_count = 0
+                hash_sizes = {}
                 for size in item.get('sizes'):
-                    size_count: int = 0
-                    size_name: str = size.get('name')
+                    size_count = 0
+                    size_name = size.get('name')
                     for stock in size.get('stocks'):
-                        item_count: int = stock.get('qty')
+                        item_count = stock.get('qty')
                         if item_count:
                             size_count += item_count
                     hash_sizes[size_name] = size_count
@@ -358,7 +316,6 @@ class ItemsParser:
                     {'sum_count': sum_count})
 
                 self._db_queue.put_nowait(card_object)
-
             self._cards_queue.task_done()
 
             logger.info('collected data for %d: %s items',
@@ -370,6 +327,9 @@ class ItemsParser:
 
             global items_count
             items_count += 1
+            global items_set
+            items_set.add(card['articles']['id'])
+
             if items_count % 10000 == 0:
                 logger.critical('ITEMS COUNT <<< %d >>>', items_count)
 
@@ -379,14 +339,14 @@ class ItemsParser:
 
 
 async def load_all_items() -> None:
-    start: float = time.time()
+    start = time.time()
 
     db = get_db()
     session: AsyncSession = await anext(db)
 
     async with session.begin():
-        selectable: Select = select(Category)
-        selectable: Select = select(Category).where(Category.id.in_([8340]))
+        selectable = select(Category)
+        selectable = select(Category).where(Category.id.in_([130545]))
         categories = await session.execute(selectable)
 
     async with ClientSession() as client_session:
@@ -394,13 +354,15 @@ async def load_all_items() -> None:
 
         await parser.start(categories)
 
-
-    finish: float = time.time()
-    impl_time: float = finish - start
-    logger.info('got %d items in %d seconds, %d requests', items_count, impl_time, parser._req_counter)
+    finish = time.time()
+    impl_time = finish - start
+    logger.info('got %d items in %d seconds, %d requests, set length - %d',
+                items_count, impl_time, parser._req_counter, len(items_set))
 
 
 # 130545 30930
 # 130558 129905
 # 8340 1273
 # 130268 220
+# 63010 181282
+# 9411 23559
