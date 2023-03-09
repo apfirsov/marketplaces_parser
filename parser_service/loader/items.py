@@ -368,10 +368,11 @@ class ItemsParser:
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
-    async def _simple_create(self, entity, in_data, s) -> None:
-        item_in_db = await s.get(entity, in_data["id"])
+    # TODO Make annotation for function (Сделать аннотацию функции)
+    async def _check_and_write(self, entity: any, data: dict, s) -> None:
+        item_in_db = await s.get(entity, data["id"])
         if item_in_db is None:
-            s.add(entity(**in_data))
+            s.add(entity(**data))
 
     async def _write_to_db(self) -> None:
         while True:
@@ -396,11 +397,11 @@ class ItemsParser:
                 try:
                     # TODO Убрать цикл после доработки от Саши
                     for color in colors:
-                        await self._simple_create(Color, color, session)
+                        await self._check_and_write(Color, color, session)
 
-                    await self._simple_create(Brand, brands, session)
-                    await self._simple_create(Item, items, session)
-                    await self._simple_create(Article, articles, session)
+                    await self._check_and_write(Brand, brands, session)
+                    await self._check_and_write(Item, items, session)
+                    await self._check_and_write(Article, articles, session)
 
                     history_in_db = ArticlesHistory(**articles_history)
                     session.add(history_in_db)
