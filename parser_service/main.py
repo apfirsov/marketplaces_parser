@@ -29,7 +29,7 @@ def main():
     try:
         uvicorn.run(app, host=HOST, port=PORT)
     except Exception as e:
-        logger.exception(f"uvicorn failed {e}")
+        logger.exception("uvicorn failed %s ", e)
 
 
 if __name__ == "__main__":
