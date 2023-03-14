@@ -1,7 +1,8 @@
 import asyncio
 import sys
 import time
-from asyncio import Queue, Semaphore, create_task
+from asyncio import Queue, Semaphore, Task, create_task
+import datetime
 
 import pydantic
 from aiohttp import ClientSession
@@ -16,6 +17,17 @@ from logger_config import parser_logger as logger
 from schemas import ArticleSchema
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.selectable import Select
+from db.models import (
+    Color,
+    Brand,
+    Item,
+    Article,
+    ArticlesHistory,
+    Size,
+    HistorySizeRelation
+)
+
 
 items_cnt = 0
 items_set = set()
@@ -33,7 +45,7 @@ class ItemsParser:
 
     def __init__(self, client_session: ClientSession) -> None:
         self._session = client_session
-        self._timestamp = time.time()
+        self._timestamp = datetime.datetime.now()
         self._request_semaphore = Semaphore(REQUEST_LIMIT)
         self._categories_queue = Queue()
         self._ids_queue = Queue()
@@ -58,6 +70,7 @@ class ItemsParser:
             create_task(self._get_cards())
             create_task(self._collect_data())
             create_task(self._get_items_ids())
+        create_task(self._write_to_db())
 
         create_task(self._write_to_db())
         await create_task(self._waiter())
@@ -308,6 +321,12 @@ class ItemsParser:
             logger.info('collected data for %d: %s items',
                         category_id, len(cards))
 
+    # TODO Make annotation for function (Сделать аннотацию функции)
+    async def _check_and_write(self, entity: any, data: dict, s) -> None:
+        item_in_db = await s.get(entity, data["id"])
+        if item_in_db is None:
+            s.add(entity(**data))
+
     async def _write_to_db(self) -> None:
         while True:
             card = await self._db_queue.get()
@@ -320,8 +339,58 @@ class ItemsParser:
             if items_cnt % 10000 == 0:
                 logger.critical('ITEMS COUNT <<< %d >>>', items_cnt)
 
-            # your code here
+            db = get_db()
+            session: AsyncSession = await anext(db)
 
+            colors: list = card["colors"]
+            sizes: list = card["sizes"]
+            brands: dict = card["brands"]
+            items: dict = card["items"]
+            articles: dict = card["articles"]
+            articles_history: dict = card["articles_history"]
+
+            async with session.begin():
+                try:
+                    # TODO Убрать цикл после доработки от Саши
+                    for color in colors:
+                        await self._check_and_write(Color, color, session)
+
+                    await self._check_and_write(Brand, brands, session)
+                    await self._check_and_write(Item, items, session)
+                    await self._check_and_write(Article, articles, session)
+
+                    history_in_db = ArticlesHistory(**articles_history)
+                    session.add(history_in_db)
+
+                    # size in db
+                    # TODO Доработать запись в БД Size
+                    db_sizes = {}
+                    for size in sizes:
+                        res = await session.scalars(
+                            select(Size).where(Size.name == size["name"]))
+                        size_in_db = res.one_or_none()
+                        if size_in_db is None:
+                            size_in_db = Size(name=size["name"])
+                            session.add(size_in_db)
+                        db_sizes[size["name"]] = (size["count"], size_in_db)
+                    await session.flush()
+
+                    # history_size_relation in db
+                    for count, size_in_db in db_sizes.values():
+                        session.add(
+                            HistorySizeRelation(
+                                history=history_in_db.id,
+                                size=size_in_db.id,
+                                count=count
+                            )
+                        )
+
+                except Exception as err:
+                    await session.rollback()
+                    logger.critical("!!!!!!Error write_to_db!!!! %s", err)
+                    raise err
+                else:
+                    await session.commit()
             self._db_queue.task_done()
 
 
@@ -333,7 +402,9 @@ async def load_all_items() -> None:
 
     async with session.begin():
         selectable = select(Category)
-        # selectable = select(Category).where(Category.id.in_([63010]))
+        # selectable: Select = select(Category).where(Category.id.in_([63010]))
+        # selectable: Select = select(Category).where(Category.id.in_([130558]))
+
         categories = await session.execute(selectable)
 
     async with ClientSession() as client_session:

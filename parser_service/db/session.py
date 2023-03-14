@@ -9,7 +9,7 @@ engine = create_async_engine(
     POSTGRES_URL,
     future=True,
     echo=True,
-    execution_options={"isolation_level": "AUTOCOMMIT"},
+    execution_options={"isolation_level": "READ COMMITTED"},
 )
 
 async_session = sessionmaker(
